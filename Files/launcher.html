@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI USB Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 520px;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 6px;
+            letter-spacing: -0.5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #111118;
+            border: 1px solid #1e1e2a;
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .status-bar .label {
+            color: #666;
+        }
+
+        .status-bar .value {
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .dot-offline { background: #ef4444; }
+        .dot-online  { background: #22c55e; }
+        .dot-waiting { background: #eab308; }
+
+        .models {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+
+        .model-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #111118;
+            border: 1px solid #1e1e2a;
+            border-radius: 12px;
+            padding: 16px 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .model-btn:hover {
+            border-color: #3b3b5c;
+            background: #16161f;
+        }
+
+        .model-btn.selected {
+            border-color: #6366f1;
+            background: #13132a;
+        }
+
+        .model-btn .left {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .model-btn .name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .model-btn .desc {
+            font-size: 12px;
+            color: #555;
+        }
+
+        .model-btn .badge {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge-e2b    { background: #1a2e1a; color: #4ade80; }
+        .badge-e4b    { background: #2e2a1a; color: #fbbf24; }
+
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #6366f1;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #5558e6;
+        }
+
+        .btn-primary:disabled {
+            background: #2a2a3a;
+            color: #555;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            width: 100%;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid #1e1e2a;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #111118;
+            color: #aaa;
+        }
+
+        .btn-secondary:hover {
+            border-color: #3b3b5c;
+            color: #fff;
+        }
+
+        .instructions {
+            margin-top: 24px;
+            background: #111118;
+            border: 1px solid #1e1e2a;
+            border-radius: 12px;
+            padding: 16px 18px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: #888;
+            display: none;
+        }
+
+        .instructions.visible {
+            display: block;
+        }
+
+        .instructions code {
+            background: #1a1a24;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 12px;
+            color: #c084fc;
+        }
+
+        .instructions h3 {
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .chat-container {
+            display: none;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 0;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #0a0a0f;
+            z-index: 100;
+        }
+
+        .chat-container.visible {
+            display: flex;
+        }
+
+        .chat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid #1e1e2a;
+            background: #111118;
+        }
+
+        .chat-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .chat-header button {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 20px;
+            padding: 4px 8px;
+        }
+
+        .chat-header button:hover {
+            color: #fff;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .message-user {
+            align-self: flex-end;
+            background: #6366f1;
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message-assistant {
+            align-self: flex-start;
+            background: #1a1a24;
+            color: #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-system {
+            align-self: center;
+            background: transparent;
+            color: #555;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .chat-input-area {
+            display: flex;
+            gap: 8px;
+            padding: 12px 18px;
+            border-top: 1px solid #1e1e2a;
+            background: #111118;
+        }
+
+        .chat-input-area textarea {
+            flex: 1;
+            background: #0a0a0f;
+            border: 1px solid #1e1e2a;
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            outline: none;
+            max-height: 120px;
+        }
+
+        .chat-input-area textarea:focus {
+            border-color: #6366f1;
+        }
+
+        .chat-input-area button {
+            background: #6366f1;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 16px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .chat-input-area button:hover {
+            background: #5558e6;
+        }
+
+        .chat-input-area button:disabled {
+            background: #2a2a3a;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Main Launcher -->
+<div class="container" id="launcher">
+    <div class="header">
+        <h1>AI USB Assistant</h1>
+        <p>Portable Local AI — Gemma 4 (vision + audio + thinking)</p>
+    </div>
+
+    <div class="status-bar">
+        <div>
+            <span class="label">Server: </span>
+            <span class="status-dot dot-offline" id="statusDot"></span>
+            <span class="value" id="statusText">Not connected</span>
+        </div>
+        <div>
+            <span class="label">Model: </span>
+            <span class="value" id="currentModel">—</span>
+        </div>
+    </div>
+
+    <div class="models">
+        <div class="model-btn selected" data-model="e2b" onclick="selectModel('e2b')">
+            <div class="left">
+                <span class="name">Gemma 4 E2B</span>
+                <span class="desc">Fast, light model — runs on any PC (4+ GB RAM)</span>
+            </div>
+            <span class="badge badge-e2b">Default</span>
+        </div>
+
+        <div class="model-btn" data-model="e4b" onclick="selectModel('e4b')">
+            <div class="left">
+                <span class="name">Gemma 4 E4B</span>
+                <span class="desc">Smarter model — optional download (8+ GB RAM)</span>
+            </div>
+            <span class="badge badge-e4b">Optional</span>
+        </div>
+    </div>
+
+    <div class="actions">
+        <button class="btn-primary" id="btnChat" onclick="openChat()">Open Chat</button>
+        <button class="btn-secondary" id="btnInstructions" onclick="toggleInstructions()">How to launch</button>
+    </div>
+
+    <div class="instructions" id="instructions">
+        <h3>How to launch</h3>
+        <strong>Windows:</strong><br>
+        Double-click <code>Start_Windows.bat</code><br>
+        Server starts automatically, browser opens<br><br>
+        <strong>After launch:</strong><br>
+        Server runs at <code>http://127.0.0.1:8080</code><br>
+        Click <strong>Open Chat</strong> above or open the link in browser<br>
+        You can upload images and send audio for multimodal input
+    </div>
+</div>
+
+<!-- Chat Interface -->
+<div class="chat-container" id="chatView">
+    <div class="chat-header">
+        <h2 id="chatTitle">AI Chat</h2>
+        <button onclick="closeChat()" title="Back">✕</button>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+        <div class="message message-system">Send a message to start chatting</div>
+    </div>
+    <div class="chat-input-area">
+        <textarea id="chatInput" rows="1" placeholder="Type a message..."
+                  onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button id="btnSend" onclick="sendMessage()">→</button>
+    </div>
+</div>
+
+<script>
+    const API_BASE = 'http://127.0.0.1:8080';
+    let selectedModel = null;
+    let isConnected = false;
+    let chatHistory = [];
+    let isGenerating = false;
+
+    const modelNames = {
+        e2b: 'Gemma 4 E2B',
+        e4b: 'Gemma 4 E4B'
+    };
+
+    // ============================
+    //  Model Selection
+    // ============================
+    function selectModel(model) {
+        selectedModel = model;
+        document.querySelectorAll('.model-btn').forEach(btn => {
+            btn.classList.toggle('selected', btn.dataset.model === model);
+        });
+        document.getElementById('currentModel').textContent = modelNames[model];
+    }
+
+    // ============================
+    //  Server Status Check
+    // ============================
+    async function checkServer() {
+        const dot = document.getElementById('statusDot');
+        const text = document.getElementById('statusText');
+        try {
+            const resp = await fetch(API_BASE + '/health', { signal: AbortSignal.timeout(2000) });
+            if (resp.ok) {
+                const data = await resp.json();
+                isConnected = data.status === 'ok' || data.status === 'no slot available';
+                if (isConnected) {
+                    dot.className = 'status-dot dot-online';
+                    text.textContent = 'Connected';
+                    return;
+                }
+            }
+        } catch (e) {}
+        isConnected = false;
+        dot.className = 'status-dot dot-offline';
+        text.textContent = 'Not connected';
+    }
+
+    // ============================
+    //  Chat
+    // ============================
+    function openChat() {
+        if (!isConnected) {
+            alert('Server is not running!\n\nRun Start_Windows.bat first,\nthen click Open Chat.');
+            return;
+        }
+        document.getElementById('chatView').classList.add('visible');
+        document.getElementById('launcher').style.display = 'none';
+        document.getElementById('chatTitle').textContent =
+            selectedModel ? modelNames[selectedModel] : 'AI Chat';
+        document.getElementById('chatInput').focus();
+    }
+
+    function closeChat() {
+        document.getElementById('chatView').classList.remove('visible');
+        document.getElementById('launcher').style.display = 'block';
+    }
+
+    function addMessage(role, content) {
+        const container = document.getElementById('chatMessages');
+        const div = document.createElement('div');
+        div.className = 'message message-' + role;
+        div.textContent = content;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        return div;
+    }
+
+    async function sendMessage() {
+        if (isGenerating) return;
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+        if (!text) return;
+
+        input.value = '';
+        autoResize(input);
+        addMessage('user', text);
+
+        chatHistory.push({ role: 'user', content: text });
+
+        isGenerating = true;
+        document.getElementById('btnSend').disabled = true;
+
+        const assistantDiv = addMessage('assistant', '');
+        let fullResponse = '';
+
+        try {
+            const resp = await fetch(API_BASE + '/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: chatHistory,
+                    stream: true,
+                    temperature: 0.7,
+                    max_tokens: 2048
+                })
+            });
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const data = line.slice(6).trim();
+                    if (data === '[DONE]') break;
+
+                    try {
+                        const json = JSON.parse(data);
+                        const delta = json.choices?.[0]?.delta?.content;
+                        if (delta) {
+                            fullResponse += delta;
+                            assistantDiv.textContent = fullResponse;
+                            document.getElementById('chatMessages').scrollTop =
+                                document.getElementById('chatMessages').scrollHeight;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            if (fullResponse) {
+                chatHistory.push({ role: 'assistant', content: fullResponse });
+            }
+        } catch (e) {
+            assistantDiv.textContent = '[Connection error]';
+            assistantDiv.style.color = '#ef4444';
+        }
+
+        isGenerating = false;
+        document.getElementById('btnSend').disabled = false;
+        document.getElementById('chatInput').focus();
+    }
+
+    function handleKey(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+
+    function autoResize(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+
+    // ============================
+    //  Instructions Toggle
+    // ============================
+    function toggleInstructions() {
+        document.getElementById('instructions').classList.toggle('visible');
+    }
+
+    // ============================
+    //  Init
+    // ============================
+    checkServer();
+    setInterval(checkServer, 3000);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "context_size": 4096,
+  "mmproj": "gemma-4-e2b-mmproj.gguf",
+  "models": {
+    "e2b": {
+      "name": "Gemma 4 E2B",
+      "file": "gemma-4-e2b.gguf",
+      "min_ram_gb": 4,
+      "size_gb": 1.8,
+      "included": true,
+      "capabilities": ["text", "vision", "audio", "thinking"],
+      "description": "Fast, light model. Runs on any PC (4+ GB RAM). Shipped with the app."
+    },
+    "e4b": {
+      "name": "Gemma 4 E4B",
+      "file": "gemma-4-e4b.gguf",
+      "min_ram_gb": 8,
+      "size_gb": 3.1,
+      "included": false,
+      "capabilities": ["text", "vision", "audio", "thinking"],
+      "hf_repo": "unsloth/gemma-4-E4B-it-GGUF",
+      "hf_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "description": "Smarter model. Optional download. Needs 8+ GB RAM."
+    }
+  }
+}
