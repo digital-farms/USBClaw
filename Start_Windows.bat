@@ -52,25 +52,31 @@ if not errorlevel 1 (
     )
 )
 
-:: Detect models
+:: Detect models (support both original HF names and short names)
 set "HAS_E2B=0"
 set "HAS_E4B=0"
 set "HAS_31B=0"
-if exist "%MODELS%\gemma-4-e2b.gguf" set "HAS_E2B=1"
-if exist "%MODELS%\gemma-4-e4b.gguf" set "HAS_E4B=1"
-if exist "%MODELS%\gemma-4-31b.gguf" set "HAS_31B=1"
+set "E2B_FILE="
+set "E4B_FILE="
+set "B31_FILE="
+if exist "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf" )
+if exist "%MODELS%\gemma-4-e2b.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-e2b.gguf" )
+if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf" )
+if exist "%MODELS%\gemma-4-e4b.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-e4b.gguf" )
+if exist "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31B-it-Q4_K_M.gguf" )
+if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31b.gguf" )
 
 :: Default model selection
 if "!HAS_E2B!"=="1" (
-    set "MODEL_FILE=gemma-4-e2b.gguf"
+    set "MODEL_FILE=!E2B_FILE!"
     set "MODEL_NAME=Gemma 4 E2B"
 )
 if "!HAS_E2B!"=="0" if "!HAS_E4B!"=="1" (
-    set "MODEL_FILE=gemma-4-e4b.gguf"
+    set "MODEL_FILE=!E4B_FILE!"
     set "MODEL_NAME=Gemma 4 E4B"
 )
 if "!HAS_E2B!"=="0" if "!HAS_E4B!"=="0" if "!HAS_31B!"=="1" (
-    set "MODEL_FILE=gemma-4-31b.gguf"
+    set "MODEL_FILE=!B31_FILE!"
     set "MODEL_NAME=Gemma 4 31B"
 )
 if not defined MODEL_FILE (
@@ -165,7 +171,7 @@ goto :main_menu
 
 :pick_e2b
 if "!HAS_E2B!"=="1" (
-    set "MODEL_FILE=gemma-4-e2b.gguf"
+    set "MODEL_FILE=!E2B_FILE!"
     set "MODEL_NAME=Gemma 4 E2B"
 ) else (
     echo.
@@ -176,7 +182,7 @@ goto :main_menu
 
 :pick_e4b
 if "!HAS_E4B!"=="1" (
-    set "MODEL_FILE=gemma-4-e4b.gguf"
+    set "MODEL_FILE=!E4B_FILE!"
     set "MODEL_NAME=Gemma 4 E4B"
 ) else (
     echo.
@@ -187,7 +193,7 @@ goto :main_menu
 
 :pick_31b
 if "!HAS_31B!"=="1" (
-    set "MODEL_FILE=gemma-4-31b.gguf"
+    set "MODEL_FILE=!B31_FILE!"
     set "MODEL_NAME=Gemma 4 31B"
 ) else (
     echo.
@@ -291,11 +297,11 @@ echo.
 echo  Downloading Gemma 4 E2B...
 echo  Source: huggingface.co/unsloth/gemma-4-E2B-it-GGUF
 echo.
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf"
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf"
 if errorlevel 1 (
     echo.
     echo  [X] Download failed. Check your internet connection.
-    del "%MODELS%\gemma-4-e2b.gguf" 2>nul
+    del "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" 2>nul
 ) else (
     set "HAS_E2B=1"
     echo.
@@ -310,11 +316,11 @@ echo.
 echo  Downloading Gemma 4 E4B...
 echo  Source: huggingface.co/unsloth/gemma-4-E4B-it-GGUF
 echo.
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e4b.gguf" "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"
 if errorlevel 1 (
     echo.
     echo  [X] Download failed. Check your internet connection.
-    del "%MODELS%\gemma-4-e4b.gguf" 2>nul
+    del "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" 2>nul
 ) else (
     set "HAS_E4B=1"
     echo.
@@ -329,11 +335,11 @@ echo.
 echo  Downloading Gemma 4 31B (~18 GB, this will take a while)...
 echo  Source: huggingface.co/unsloth/gemma-4-31B-it-GGUF
 echo.
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-31b.gguf" "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q4_K_M.gguf"
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q4_K_M.gguf"
 if errorlevel 1 (
     echo.
     echo  [X] Download failed. Check your internet connection.
-    del "%MODELS%\gemma-4-31b.gguf" 2>nul
+    del "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" 2>nul
 ) else (
     set "HAS_31B=1"
     echo.
@@ -368,10 +374,10 @@ if not exist "!MODEL_PATH!" (
 :: Build extra args
 set "EXTRA_ARGS="
 
-:: Multimodal (E-series models only)
+:: Multimodal (E-series models only, detected by MODEL_NAME)
 set "MMPROJ_PATH=%MODELS%\!MMPROJ_FILE!"
-if "!MODEL_FILE!"=="gemma-4-e2b.gguf" if exist "!MMPROJ_PATH!" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
-if "!MODEL_FILE!"=="gemma-4-e4b.gguf" if exist "!MMPROJ_PATH!" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+if "!MODEL_NAME!"=="Gemma 4 E2B" if exist "!MMPROJ_PATH!" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+if "!MODEL_NAME!"=="Gemma 4 E4B" if exist "!MMPROJ_PATH!" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
 
 :: Reasoning is now controlled dynamically by the RAG proxy (inject.js toggle button)
 :: No need for --reasoning flag here

@@ -33,10 +33,7 @@ Or download manually:
 | **Gemma 4 E4B** | ~3.1 GB | 8+ GB | [Download](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf) |
 | **Gemma 4 31B** | ~18 GB | 20+ GB | [Download](https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q4_K_M.gguf) |
 
-Save model files to `Files\models\` and rename:
-- `gemma-4-E2B-it-Q4_K_M.gguf` → `gemma-4-e2b.gguf`
-- `gemma-4-E4B-it-Q4_K_M.gguf` → `gemma-4-e4b.gguf`
-- `gemma-4-31B-it-Q4_K_M.gguf` → `gemma-4-31b.gguf`
+Save downloaded files to `Files\models\` (no renaming needed).
 
 **Step 3 — Vision/audio support (optional, ~941 MB)**
 
