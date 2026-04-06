@@ -46,7 +46,7 @@ Save downloaded files to `Files\models\` (no renaming needed).
 **Step 3 — Vision/audio support (optional, ~941 MB)**
 
 For image and audio input, download the multimodal projector:
-- [gemma-4-e2b-mmproj.gguf](https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-e2b-mmproj-BF16.gguf)
+- [gemma-4-e2b-mmproj.gguf](https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-e2b-it-f16.gguf)
 - Save as `Files\models\gemma-4-e2b-mmproj.gguf`
 
 ## Quick Start

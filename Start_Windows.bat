@@ -64,6 +64,7 @@ if not errorlevel 1 (
 set "HAS_E2B=0"
 set "HAS_E4B=0"
 set "HAS_31B=0"
+set "HAS_MMPROJ=0"
 set "E2B_FILE="
 set "E4B_FILE="
 set "B31_FILE="
@@ -73,6 +74,8 @@ if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE
 if exist "%MODELS%\gemma-4-e4b.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-e4b.gguf" )
 if exist "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31B-it-Q4_K_M.gguf" )
 if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31b.gguf" )
+if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" set "HAS_MMPROJ=1"
+if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" set "HAS_MMPROJ=1"
 
 :: Default model selection
 if "!HAS_E2B!"=="1" (
@@ -261,6 +264,26 @@ goto :settings_menu
 ::  Download models
 :: =============================================
 :download_menu
+:: Re-detect models after downloads
+set "HAS_E2B=0"
+set "HAS_E4B=0"
+set "HAS_31B=0"
+set "HAS_MMPROJ=0"
+set "E2B_FILE="
+set "E4B_FILE="
+set "B31_FILE="
+if exist "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf" )
+if exist "%MODELS%\gemma-4-e2b.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-e2b.gguf" )
+if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf" )
+if exist "%MODELS%\gemma-4-e4b.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-e4b.gguf" )
+if exist "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31B-it-Q4_K_M.gguf" )
+if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31b.gguf" )
+if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" set "HAS_MMPROJ=1"
+if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" set "HAS_MMPROJ=1"
+:: Auto-select first available model if none selected
+if not defined MODEL_FILE if "!HAS_E2B!"=="1" ( set "MODEL_FILE=!E2B_FILE!" & set "MODEL_NAME=Gemma 4 E2B" )
+if not defined MODEL_FILE if "!HAS_E4B!"=="1" ( set "MODEL_FILE=!E4B_FILE!" & set "MODEL_NAME=Gemma 4 E4B" )
+if not defined MODEL_FILE if "!HAS_31B!"=="1" ( set "MODEL_FILE=!B31_FILE!" & set "MODEL_NAME=Gemma 4 31B" )
 cls
 echo.
 echo  ============================================
@@ -284,12 +307,18 @@ if "!HAS_31B!"=="1" (
 ) else (
     echo    Gemma 4 31B    [not downloaded]
 )
+if "!HAS_MMPROJ!"=="1" (
+    echo    Vision model   [OK]
+) else (
+    echo    Vision model   [not downloaded]
+)
 echo.
 echo  Available downloads:
 echo.
-echo    [1]  Gemma 4 E2B   ~1.8 GB   fast, light     4+ GB RAM
-echo    [2]  Gemma 4 E4B   ~3.1 GB   smarter         8+ GB RAM
-echo    [3]  Gemma 4 31B   ~18 GB    most powerful   20+ GB RAM
+echo    [1]  Gemma 4 E2B    ~1.8 GB   fast, light     4+ GB RAM
+echo    [2]  Gemma 4 E4B    ~3.1 GB   smarter         8+ GB RAM
+echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM
+echo    [4]  Vision model   ~941 MB   image/audio input support
 echo.
 echo    [0]  Back
 echo.
@@ -298,6 +327,7 @@ set /p "DC=  > "
 if "!DC!"=="1" goto :download_e2b
 if "!DC!"=="2" goto :download_e4b
 if "!DC!"=="3" goto :download_31b
+if "!DC!"=="4" goto :download_mmproj
 goto :main_menu
 
 :download_e2b
@@ -355,6 +385,26 @@ if errorlevel 1 (
     set "HAS_31B=1"
     echo.
     echo  [OK] Gemma 4 31B downloaded!
+)
+echo.
+pause
+goto :download_menu
+
+:download_mmproj
+if not exist "%MODELS%" mkdir "%MODELS%"
+echo.
+echo  Downloading Vision model (mmproj)...
+echo  Source: huggingface.co/ggml-org/gemma-4-E2B-it-GGUF
+echo.
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-e2b-it-f16.gguf?download=true"
+if errorlevel 1 (
+    echo.
+    echo  [X] Download failed. Check your internet connection.
+    del "%MODELS%\gemma-4-e2b-mmproj.gguf" 2>nul
+) else (
+    set "HAS_MMPROJ=1"
+    echo.
+    echo  [OK] Vision model downloaded!
 )
 echo.
 pause
