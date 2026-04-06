@@ -293,6 +293,7 @@ if "!DC!"=="3" goto :download_31b
 goto :main_menu
 
 :download_e2b
+if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
 echo  Downloading Gemma 4 E2B...
 echo  Source: huggingface.co/unsloth/gemma-4-E2B-it-GGUF
@@ -312,6 +313,7 @@ pause
 goto :download_menu
 
 :download_e4b
+if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
 echo  Downloading Gemma 4 E4B...
 echo  Source: huggingface.co/unsloth/gemma-4-E4B-it-GGUF
@@ -331,6 +333,7 @@ pause
 goto :download_menu
 
 :download_31b
+if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
 echo  Downloading Gemma 4 31B (~18 GB, this will take a while)...
 echo  Source: huggingface.co/unsloth/gemma-4-31B-it-GGUF

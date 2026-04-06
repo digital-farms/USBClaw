@@ -8,17 +8,25 @@ Supports text, images, audio, and optional reasoning/thinking mode.
 
 ### Option A: Git Clone (recommended)
 
-```bash
-git clone https://github.com/digital-farms/USBClaw.git E:\
+Insert your USB flash drive (formatted as **exFAT**), open PowerShell/CMD and run:
+
+```
+git clone https://github.com/digital-farms/USBClaw.git
 ```
 
-Replace `E:\` with your USB drive letter.
+This creates a `USBClaw` folder wherever you run it. Move it to your flash drive if needed.
+
+Or clone directly to the flash drive (replace `G:` with your drive letter):
+
+```
+git clone https://github.com/digital-farms/USBClaw.git G:\USBClaw
+```
 
 ### Option B: Download ZIP
 
 1. Go to https://github.com/digital-farms/USBClaw
-2. Click **Code → Download ZIP**
-3. Extract to USB flash drive root
+2. Green button **Code → Download ZIP**
+3. Extract to USB flash drive
 
 ### Download a model
 
