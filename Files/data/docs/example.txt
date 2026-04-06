@@ -1,0 +1,38 @@
+AI USB Assistant — Quick Guide
+
+This is a portable AI assistant that runs entirely from a USB flash drive.
+It uses Google Gemma 4 models with llama.cpp for local inference.
+
+Supported features:
+- Text chat with AI
+- Image recognition (vision)
+- Audio understanding
+- Thinking/reasoning mode
+- Local document search (RAG)
+
+Models:
+- Gemma 4 E2B: fast, light model, requires 4+ GB RAM
+- Gemma 4 E4B: smarter model, requires 8+ GB RAM
+
+Requirements:
+- Windows 10 or later
+- USB flash drive formatted as exFAT (not FAT32, because of 4 GB file limit)
+- Minimum 4 GB RAM
+
+How to use:
+1. Plug in the USB flash drive
+2. Run Start_Windows.bat
+3. Wait for the model to load (15-60 seconds)
+4. Chat in the browser at http://127.0.0.1:8080
+
+To use local document search:
+1. Place your documents (.txt, .md, .csv) in the data/docs folder
+2. Click "Reindex Documents" in the RAG panel (bottom-right corner)
+3. Enable "Use local docs" toggle
+4. Ask questions about your documents
+
+Tips:
+- The USB must be exFAT formatted
+- No internet connection is needed
+- All data stays on your USB drive
+- Close the terminal window to stop the server
