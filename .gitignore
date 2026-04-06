@@ -1,0 +1,15 @@
+# Models (too large for git, downloaded via menu)
+Files/models/*.gguf
+
+# RAG index (generated at runtime)
+Files/data/index/*
+!Files/data/index/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS junk
+Thumbs.db
+.DS_Store
+desktop.ini
