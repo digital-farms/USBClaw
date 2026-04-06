@@ -23,6 +23,14 @@ set "MODEL_NAME="
 set "THINK_LABEL=OFF"
 
 :: =============================================
+::  Git safe.directory (USB drives need this)
+:: =============================================
+where git >nul 2>&1
+if not errorlevel 1 (
+    git config --global --add safe.directory "%BASE:~0,-1%" >nul 2>&1
+)
+
+:: =============================================
 ::  System check
 :: =============================================
 cls
