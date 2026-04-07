@@ -48,7 +48,8 @@ if not exist "%LLAMA%" (
     echo.
     echo      Download from github.com/ggml-org/llama.cpp/releases
     echo.
-    pause
+    echo  Press any key to exit...
+    pause >nul
     exit /b 1
 )
 
@@ -284,12 +285,21 @@ if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" set "HAS_MMPROJ=1"
 if not defined MODEL_FILE if "!HAS_E2B!"=="1" ( set "MODEL_FILE=!E2B_FILE!" & set "MODEL_NAME=Gemma 4 E2B" )
 if not defined MODEL_FILE if "!HAS_E4B!"=="1" ( set "MODEL_FILE=!E4B_FILE!" & set "MODEL_NAME=Gemma 4 E4B" )
 if not defined MODEL_FILE if "!HAS_31B!"=="1" ( set "MODEL_FILE=!B31_FILE!" & set "MODEL_NAME=Gemma 4 31B" )
+:: Detect FAT32
+set "IS_FAT32=0"
+for /f "tokens=*" %%F in ('fsutil fsinfo volumeinfo "%BASE:~0,2%\" 2^>nul ^| findstr /i "FAT32"') do set "IS_FAT32=1"
 cls
 echo.
 echo  ============================================
 echo    Download Models
 echo  ============================================
 echo.
+if "!IS_FAT32!"=="1" (
+    echo  [!] Drive is FAT32 - max file size 4 GB
+    echo      Models over 4 GB will NOT work.
+    echo      To use 31B, reformat drive as exFAT.
+    echo.
+)
 echo  Models on disk:
 echo.
 if "!HAS_E2B!"=="1" (
@@ -317,7 +327,11 @@ echo  Available downloads:
 echo.
 echo    [1]  Gemma 4 E2B    ~1.8 GB   fast, light     4+ GB RAM
 echo    [2]  Gemma 4 E4B    ~3.1 GB   smarter         8+ GB RAM
-echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM
+if "!IS_FAT32!"=="1" (
+    echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM  [needs exFAT!]
+) else (
+    echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM
+)
 echo    [4]  Vision model   ~941 MB   image/audio input support
 echo.
 echo    [0]  Back
@@ -347,7 +361,8 @@ if errorlevel 1 (
     echo  [OK] Gemma 4 E2B downloaded!
 )
 echo.
-pause
+echo  Press any key...
+pause >nul
 goto :download_menu
 
 :download_e4b
@@ -367,10 +382,20 @@ if errorlevel 1 (
     echo  [OK] Gemma 4 E4B downloaded!
 )
 echo.
-pause
+echo  Press any key...
+pause >nul
 goto :download_menu
 
 :download_31b
+if "!IS_FAT32!"=="1" (
+    echo.
+    echo  [X] Cannot download 31B on FAT32 - file is ~18 GB, limit is 4 GB.
+    echo      Reformat your USB drive as exFAT first.
+    echo.
+    echo  Press any key...
+    pause >nul
+    goto :download_menu
+)
 if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
 echo  Downloading Gemma 4 31B (~18 GB, this will take a while)...
@@ -387,7 +412,8 @@ if errorlevel 1 (
     echo  [OK] Gemma 4 31B downloaded!
 )
 echo.
-pause
+echo  Press any key...
+pause >nul
 goto :download_menu
 
 :download_mmproj
@@ -407,7 +433,8 @@ if errorlevel 1 (
     echo  [OK] Vision model downloaded!
 )
 echo.
-pause
+echo  Press any key...
+pause >nul
 goto :download_menu
 
 :: =============================================
