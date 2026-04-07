@@ -1,12 +1,24 @@
 @echo off
 setlocal EnableDelayedExpansion
 
+:: Prevent window from closing on errors
+if "%~1"=="" (
+    cmd /k call "%~f0" run "%~dp0"
+    exit /b
+)
+
+:: Use passed base path (from wrapper) or fallback
+if not "%~2"=="" (
+    set "BASE=%~2"
+) else (
+    set "BASE=%~dp0"
+)
+
 title AI USB Assistant
 
 :: =============================================
 ::  Variables
 :: =============================================
-set "BASE=%~dp0"
 set "FILES=%BASE%Files\"
 set "LLAMA=%FILES%llama\win\llama-server.exe"
 set "MODELS=%FILES%models"
@@ -131,7 +143,7 @@ echo    [1]  Start server
 echo    [2]  Select model
 echo    [3]  Settings
 echo    [4]  Download models
-echo    [0]  Exit
+echo    [q]  Exit
 echo.
 set "MENU="
 set /p "MENU=  > "
@@ -139,7 +151,7 @@ if "!MENU!"=="1" goto :pre_launch
 if "!MENU!"=="2" goto :model_menu
 if "!MENU!"=="3" goto :settings_menu
 if "!MENU!"=="4" goto :download_menu
-if "!MENU!"=="0" exit /b 0
+if /i "!MENU!"=="q" exit /b 0
 goto :main_menu
 
 :: =============================================
@@ -251,7 +263,8 @@ goto :settings_menu
 :ctx_input
 echo.
 set "CTXIN="
-set /p "CTXIN=  Enter context size: "
+set /p "CTXIN=  Enter context size (or 0 = back): "
+if "!CTXIN!"=="0" goto :settings_menu
 if "!CTXIN!"=="a" set "CTX=2048"
 if "!CTXIN!"=="b" set "CTX=4096"
 if "!CTXIN!"=="c" set "CTX=8192"
@@ -357,8 +370,10 @@ if errorlevel 1 (
     del "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" 2>nul
 ) else (
     set "HAS_E2B=1"
+    set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf"
     echo.
     echo  [OK] Gemma 4 E2B downloaded!
+    if "!HAS_MMPROJ!"=="0" goto :offer_mmproj
 )
 echo.
 echo  Press any key...
@@ -378,8 +393,10 @@ if errorlevel 1 (
     del "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" 2>nul
 ) else (
     set "HAS_E4B=1"
+    set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
     echo.
     echo  [OK] Gemma 4 E4B downloaded!
+    if "!HAS_MMPROJ!"=="0" goto :offer_mmproj
 )
 echo.
 echo  Press any key...
@@ -415,6 +432,22 @@ echo.
 echo  Press any key...
 pause >nul
 goto :download_menu
+
+:offer_mmproj
+echo.
+echo  --------------------------------------------
+echo  Vision model enables image/audio input (~941 MB).
+echo.
+set "DV="
+set /p "DV=  Download vision model now? [y/n] > "
+if /i not "!DV!"=="y" (
+    echo.
+    echo  Skipped. You can download it later from [4] Download models.
+    echo.
+    echo  Press any key...
+    pause >nul
+    goto :download_menu
+)
 
 :download_mmproj
 if not exist "%MODELS%" mkdir "%MODELS%"
@@ -463,9 +496,24 @@ if not exist "!MODEL_PATH!" (
 set "EXTRA_ARGS="
 
 :: Multimodal (E-series models only, detected by MODEL_NAME)
+:: Only use mmproj if file exists and is larger than 100 MB (to skip corrupt/incomplete downloads)
 set "MMPROJ_PATH=%MODELS%\!MMPROJ_FILE!"
-if "!MODEL_NAME!"=="Gemma 4 E2B" if exist "!MMPROJ_PATH!" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
-if "!MODEL_NAME!"=="Gemma 4 E4B" if exist "!MMPROJ_PATH!" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+set "MMPROJ_OK=0"
+if exist "!MMPROJ_PATH!" (
+    for %%A in ("!MMPROJ_PATH!") do (
+        if %%~zA GTR 100000000 set "MMPROJ_OK=1"
+    )
+)
+if "!MMPROJ_OK!"=="1" (
+    if "!MODEL_NAME!"=="Gemma 4 E2B" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+    if "!MODEL_NAME!"=="Gemma 4 E4B" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+) else (
+    if exist "!MMPROJ_PATH!" (
+        echo  [!] Vision model file seems corrupt or incomplete, skipping.
+        echo      Re-download it from [4] Download models.
+        echo.
+    )
+)
 
 :: Reasoning is now controlled dynamically by the RAG proxy (inject.js toggle button)
 :: No need for --reasoning flag here
@@ -529,7 +577,7 @@ echo.
 echo  --------------------------------------------
 echo.
 
-start "llama-server" "%LLAMA%" --host %HOST% --port %PORT% -m "!MODEL_PATH!" -c %CTX% !EXTRA_ARGS!
+start "llama-server" cmd /k ""%LLAMA%" --host %HOST% --port %PORT% -m "!MODEL_PATH!" -c %CTX% !EXTRA_ARGS!"
 
 echo  Loading model...
 echo  This may take 15-60 seconds depending on your drive.
