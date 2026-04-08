@@ -29,6 +29,17 @@ from pathlib import Path
 from io import BytesIO
 import mimetypes
 
+# Tools module (safe read-only system tools)
+try:
+    from tools import (
+        get_tools_openai_format, execute_tool, init_allowed_roots,
+        TOOL_REGISTRY
+    )
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOLS_AVAILABLE = False
+    print("  [WARN] tools.py not found — tools feature disabled")
+
 # ============================================================
 #  Paths
 # ============================================================
@@ -46,11 +57,14 @@ META_FILE = INDEX_DIR / "meta.json"
 # ============================================================
 rag_enabled = False
 reasoning_enabled = False
+tools_enabled = False
 rag_lock = threading.Lock()
 is_indexing = False
 bm25 = None          # BM25Engine instance
 chunks = []          # list of {"id", "text", "source", "offset"}
 index_meta = {}      # {"doc_count", "chunk_count", "indexed_at", "files"}
+
+MAX_TOOL_ROUNDS = 3  # Max tool call iterations per request
 
 LLAMA_HOST = "127.0.0.1"
 LLAMA_PORT = 8080
@@ -428,6 +442,8 @@ class RAGHandler(BaseHTTPRequestHandler):
             self._handle_rag_status()
         elif self.path == "/rag/files":
             self._handle_list_files()
+        elif self.path == "/rag/tools/status":
+            self._handle_tools_status()
         else:
             self._proxy_get()
 
@@ -438,6 +454,8 @@ class RAGHandler(BaseHTTPRequestHandler):
             self._handle_toggle()
         elif self.path == "/rag/reasoning":
             self._handle_reasoning_toggle()
+        elif self.path == "/rag/tools/toggle":
+            self._handle_tools_toggle()
         elif self.path == "/rag/search":
             self._handle_search()
         elif self.path == "/rag/upload":
@@ -461,10 +479,12 @@ class RAGHandler(BaseHTTPRequestHandler):
     # ---------- RAG Endpoints ----------
 
     def _handle_rag_status(self):
-        global rag_enabled, reasoning_enabled, index_meta, is_indexing
+        global rag_enabled, reasoning_enabled, tools_enabled, index_meta, is_indexing
         status = {
             "rag_enabled": rag_enabled,
             "reasoning_enabled": reasoning_enabled,
+            "tools_enabled": tools_enabled,
+            "tools_available": TOOLS_AVAILABLE,
             "is_indexing": is_indexing,
             "has_index": bm25 is not None,
             "meta": index_meta,
@@ -516,6 +536,40 @@ class RAGHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, {"reasoning_enabled": reasoning_enabled})
         print(f"  [REASONING] {'Enabled' if reasoning_enabled else 'Disabled'}")
+
+    def _handle_tools_toggle(self):
+        global tools_enabled
+        if not TOOLS_AVAILABLE:
+            self._send_json(400, {"ok": False, "error": "Tools module not available"})
+            return
+
+        body = self._read_body()
+        try:
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            data = {}
+
+        if "enabled" in data:
+            tools_enabled = bool(data["enabled"])
+        else:
+            tools_enabled = not tools_enabled
+
+        self._send_json(200, {"tools_enabled": tools_enabled})
+        print(f"  [TOOLS] {'Enabled' if tools_enabled else 'Disabled'}")
+
+    def _handle_tools_status(self):
+        tool_list = []
+        if TOOLS_AVAILABLE:
+            for name, spec in TOOL_REGISTRY.items():
+                tool_list.append({
+                    "name": name,
+                    "description": spec["description"],
+                })
+        self._send_json(200, {
+            "tools_enabled": tools_enabled,
+            "tools_available": TOOLS_AVAILABLE,
+            "tools": tool_list,
+        })
 
     def _handle_search(self):
         body = self._read_body()
@@ -653,7 +707,7 @@ class RAGHandler(BaseHTTPRequestHandler):
     # ---------- Chat Completions Intercept ----------
 
     def _handle_chat_completions(self):
-        """Intercept chat completions — augment with RAG if enabled, then proxy."""
+        """Intercept chat completions — augment with RAG if enabled, run tool loop if tools enabled, then proxy."""
         body = self._read_body()
 
         try:
@@ -675,8 +729,325 @@ class RAGHandler(BaseHTTPRequestHandler):
             data["chat_template_kwargs"] = {"enable_thinking": True}
             data["reasoning_budget"] = -1
 
-        body = json.dumps(data).encode("utf-8")
-        self._proxy_raw_post(body)
+        # If tools not enabled or not available, just proxy
+        if not tools_enabled or not TOOLS_AVAILABLE:
+            body = json.dumps(data).encode("utf-8")
+            self._proxy_raw_post(body)
+            return
+
+        # === Tool calling loop ===
+        # Strategy: disable reasoning for intermediate "tool picker" rounds
+        # to make them fast, then re-enable reasoning for the final answer.
+        original_stream = data.get("stream", False)
+        original_reasoning = reasoning_enabled
+        tools_defs = get_tools_openai_format()
+        data["tools"] = tools_defs
+        tool_calls_log = []  # Track what tools were called for UI
+        url = f"http://{LLAMA_HOST}:{LLAMA_PORT}/v1/chat/completions"
+
+        # Hint: call ALL needed tools at once to minimize slow round-trips
+        messages = data.get("messages", [])
+        messages.insert(0, {
+            "role": "system",
+            "content": (
+                "IMPORTANT: When using tools, call ALL the tools you need in a SINGLE response. "
+                "Do NOT call tools one at a time. Batch all tool calls together."
+            ),
+        })
+
+        for round_num in range(MAX_TOOL_ROUNDS):
+            # Intermediate rounds: no streaming, no reasoning, short output
+            data["stream"] = False
+            data["chat_template_kwargs"] = {"enable_thinking": False}
+            data["reasoning_budget"] = 0
+            data["max_tokens"] = 512      # Limit output — only need tool call JSON
+            data["n_predict"] = 512       # llama.cpp alias
+
+            req_body = json.dumps(data).encode("utf-8")
+            print(f"  [TOOLS] Round {round_num + 1}: asking LLM to pick tools...")
+
+            try:
+                req = Request(url, data=req_body, method="POST")
+                req.add_header("Content-Type", "application/json")
+                req.add_header("Content-Length", str(len(req_body)))
+
+                resp = urlopen(req, timeout=300)
+                resp_body = resp.read()
+                resp_data = json.loads(resp_body)
+            except Exception as e:
+                self._send_error(502, f"Cannot reach llama-server: {e}")
+                return
+
+            # Check if model returned tool calls
+            choices = resp_data.get("choices", [])
+            if not choices:
+                self._send_tool_response(resp_data, tool_calls_log, original_stream)
+                return
+
+            message = choices[0].get("message", {})
+            finish_reason = choices[0].get("finish_reason", "")
+            tool_calls = message.get("tool_calls", [])
+
+            if not tool_calls or finish_reason != "tool_calls":
+                # Model gave a final text response (no more tools needed)
+                # If reasoning was on, re-do this as the final answer with reasoning
+                if original_reasoning and tool_calls_log:
+                    break  # Fall through to final-answer block below
+                self._send_tool_response(resp_data, tool_calls_log, original_stream)
+                return
+
+            # Execute ALL tool calls from this round (parallel batch)
+            data["messages"].append(message)  # Add assistant message with tool_calls
+
+            for tc in tool_calls:
+                fn_name = tc.get("function", {}).get("name", "")
+                fn_args_raw = tc.get("function", {}).get("arguments", "{}")
+                tc_id = tc.get("id", f"call_{round_num}")
+
+                try:
+                    fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
+                except json.JSONDecodeError:
+                    fn_args = {}
+
+                print(f"  [TOOLS]   -> {fn_name}({json.dumps(fn_args, ensure_ascii=False)})")
+                start_time = time.time()
+
+                success, result = execute_tool(fn_name, fn_args)
+                elapsed = round(time.time() - start_time, 2)
+
+                tool_calls_log.append({
+                    "name": fn_name,
+                    "args": fn_args,
+                    "success": success,
+                    "time": elapsed,
+                })
+
+                status = "OK" if success else "FAIL"
+                print(f"  [TOOLS]      {status} ({elapsed}s, {len(result)} chars)")
+
+                data["messages"].append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result,
+                })
+
+            print(f"  [TOOLS] Round {round_num + 1} done: {len(tool_calls)} tool(s) executed")
+
+        # Final answer: remove tools, restore reasoning, let LLM summarize
+        print(f"  [TOOLS] Generating final answer ({len(tool_calls_log)} tools used)...")
+        data.pop("tools", None)
+        data.pop("max_tokens", None)
+        data.pop("n_predict", None)
+
+        # Restore original reasoning setting for the final answer
+        if original_reasoning:
+            data["chat_template_kwargs"] = {"enable_thinking": True}
+            data["reasoning_budget"] = -1
+        else:
+            data["chat_template_kwargs"] = {"enable_thinking": False}
+            data["reasoning_budget"] = 0
+
+        # If client wants streaming, use real streaming for the final answer
+        # This avoids timeout — data flows continuously from llama → proxy → client
+        if original_stream:
+            data["stream"] = True
+            self._stream_final_with_tools(url, data, tool_calls_log)
+        else:
+            data["stream"] = False
+            req_body = json.dumps(data).encode("utf-8")
+            try:
+                req = Request(url, data=req_body, method="POST")
+                req.add_header("Content-Type", "application/json")
+                req.add_header("Content-Length", str(len(req_body)))
+                resp = urlopen(req, timeout=600)
+                resp_body = resp.read()
+                resp_data = json.loads(resp_body)
+                self._send_tool_response(resp_data, tool_calls_log, False)
+            except Exception as e:
+                self._send_error(502, f"Cannot reach llama-server: {e}")
+
+    def _stream_final_with_tools(self, url, data, tool_calls_log):
+        """Stream the final LLM answer to client, prepending tool summary as first chunk."""
+        req_body = json.dumps(data).encode("utf-8")
+
+        try:
+            req = Request(url, data=req_body, method="POST")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Content-Length", str(len(req_body)))
+            upstream = urlopen(req, timeout=600)
+        except Exception as e:
+            self._send_error(502, f"Cannot reach llama-server: {e}")
+            return
+
+        # Start SSE response to client
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("Transfer-Encoding", "chunked")
+            self._send_cors_headers()
+            self.end_headers()
+
+            def write_chunk(raw_bytes):
+                self.wfile.write(f"{len(raw_bytes):x}\r\n".encode())
+                self.wfile.write(raw_bytes)
+                self.wfile.write(b"\r\n")
+
+            summary_injected = False
+
+            # Read upstream SSE line by line and forward to client
+            for raw_line in upstream:
+                line = raw_line.decode("utf-8", errors="replace")
+
+                # Inject tool summary into the first content chunk
+                if not summary_injected and line.startswith("data: {"):
+                    try:
+                        chunk_data = json.loads(line[6:])
+                        delta = chunk_data.get("choices", [{}])[0].get("delta", {})
+                        # Look for the first chunk that has content or role
+                        if "content" in delta or "role" in delta:
+                            if tool_calls_log:
+                                summary = self._build_tool_summary(tool_calls_log)
+                                # Inject summary as content before the real content
+                                summary_chunk = dict(chunk_data)
+                                summary_chunk["choices"] = [{
+                                    "index": 0,
+                                    "delta": {"content": summary + "\n\n"},
+                                    "finish_reason": None,
+                                }]
+                                summary_line = f"data: {json.dumps(summary_chunk, ensure_ascii=False)}\n\n"
+                                write_chunk(summary_line.encode("utf-8"))
+                            summary_injected = True
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        summary_injected = True
+
+                # Forward the original line
+                write_chunk(raw_line)
+                self.wfile.flush()
+
+            # Final zero-length chunk
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+            self.close_connection = True
+
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            print(f"  [TOOLS] Stream final error: {e}")
+
+    def _send_tool_response(self, resp_data, tool_calls_log, as_stream):
+        """Send the final tool response — as SSE if the client requested streaming."""
+        # Extract content from the non-streaming response
+        content = ""
+        choices = resp_data.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            content = message.get("content", "")
+
+        # Prepend tool summary to content if tools were used
+        if tool_calls_log:
+            summary = self._build_tool_summary(tool_calls_log)
+            content = summary + "\n\n" + content
+
+        if not as_stream:
+            # Client expects non-streaming JSON
+            if choices:
+                resp_data["choices"][0]["message"]["content"] = content
+            self._send_json(200, resp_data)
+            return
+
+        # Client expects SSE streaming — convert to SSE format
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("Transfer-Encoding", "chunked")
+            self._send_cors_headers()
+            self.end_headers()
+
+            model_name = resp_data.get("model", "")
+            chat_id = resp_data.get("id", "chatcmpl-tools")
+            created = resp_data.get("created", int(time.time()))
+
+            def write_sse(data_dict):
+                line = f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n"
+                payload = line.encode("utf-8")
+                # Chunked transfer encoding: size in hex + \r\n + data + \r\n
+                self.wfile.write(f"{len(payload):x}\r\n".encode())
+                self.wfile.write(payload)
+                self.wfile.write(b"\r\n")
+
+            # First chunk: role announcement (required by llama.cpp WebUI)
+            role_chunk = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model_name,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": ""},
+                    "finish_reason": None,
+                }],
+            }
+            write_sse(role_chunk)
+
+            # Send content in chunks to simulate streaming
+            chunk_size = 20  # characters per chunk
+            for i in range(0, len(content), chunk_size):
+                text_chunk = content[i:i + chunk_size]
+                chunk_data = {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model_name,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": text_chunk},
+                        "finish_reason": None,
+                    }],
+                }
+                write_sse(chunk_data)
+
+            # Send finish chunk
+            finish_data = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model_name,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }],
+            }
+            write_sse(finish_data)
+
+            # Send [DONE] marker
+            done_line = b"data: [DONE]\n\n"
+            self.wfile.write(f"{len(done_line):x}\r\n".encode())
+            self.wfile.write(done_line)
+            self.wfile.write(b"\r\n")
+
+            # Final zero-length chunk to signal end of chunked transfer
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+
+            self.close_connection = True
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            print(f"  [TOOLS] SSE send error: {e}")
+
+    @staticmethod
+    def _build_tool_summary(tool_calls_log):
+        """Build a markdown summary of tool calls."""
+        lines = ["> **Tools used:**"]
+        for tc in tool_calls_log:
+            icon = "\u2705" if tc["success"] else "\u274c"
+            lines.append(f"> {icon} `{tc['name']}` ({tc['time']}s)")
+        return "\n".join(lines)
 
     # ---------- Proxy Methods ----------
 

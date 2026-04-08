@@ -2,7 +2,16 @@
   "host": "127.0.0.1",
   "port": 8080,
   "context_size": 4096,
-  "mmproj": "gemma-4-e2b-mmproj.gguf",
+  "mmproj_e2b": "gemma-4-e2b-mmproj.gguf",
+  "mmproj_e4b": "gemma-4-e4b-mmproj.gguf",
+  "tools": {
+    "max_output_chars": 50000,
+    "max_file_read_bytes": 102400,
+    "max_search_results": 50,
+    "max_list_depth": 3,
+    "max_list_items": 500,
+    "max_log_lines": 200
+  },
   "models": {
     "e2b": {
       "name": "Gemma 4 E2B",

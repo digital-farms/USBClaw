@@ -25,7 +25,9 @@ set "MODELS=%FILES%models"
 set "HOST=127.0.0.1"
 set "PORT=8080"
 set "CTX=4096"
-set "MMPROJ_FILE=gemma-4-e2b-mmproj.gguf"
+set "MMPROJ_E2B=gemma-4-e2b-mmproj.gguf"
+set "MMPROJ_E4B=gemma-4-e4b-mmproj.gguf"
+set "MMPROJ_FILE="
 set "RAG_PORT=8085"
 set "RAG_SERVER=%FILES%rag\server.py"
 set "PYTHON="
@@ -78,6 +80,8 @@ set "HAS_E2B=0"
 set "HAS_E4B=0"
 set "HAS_31B=0"
 set "HAS_MMPROJ=0"
+set "HAS_MMPROJ_E2B=0"
+set "HAS_MMPROJ_E4B=0"
 set "E2B_FILE="
 set "E4B_FILE="
 set "B31_FILE="
@@ -87,8 +91,9 @@ if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE
 if exist "%MODELS%\gemma-4-e4b.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-e4b.gguf" )
 if exist "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31B-it-Q4_K_M.gguf" )
 if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31b.gguf" )
-if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" set "HAS_MMPROJ=1"
-if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" set "HAS_MMPROJ=1"
+if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
+if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
+if exist "%MODELS%\gemma-4-e4b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E4B=1" )
 
 :: Default model selection
 if "!HAS_E2B!"=="1" (
@@ -283,6 +288,8 @@ set "HAS_E2B=0"
 set "HAS_E4B=0"
 set "HAS_31B=0"
 set "HAS_MMPROJ=0"
+set "HAS_MMPROJ_E2B=0"
+set "HAS_MMPROJ_E4B=0"
 set "E2B_FILE="
 set "E4B_FILE="
 set "B31_FILE="
@@ -292,8 +299,9 @@ if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE
 if exist "%MODELS%\gemma-4-e4b.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-e4b.gguf" )
 if exist "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31B-it-Q4_K_M.gguf" )
 if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31b.gguf" )
-if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" set "HAS_MMPROJ=1"
-if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" set "HAS_MMPROJ=1"
+if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
+if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
+if exist "%MODELS%\gemma-4-e4b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E4B=1" )
 :: Auto-select first available model if none selected
 if not defined MODEL_FILE if "!HAS_E2B!"=="1" ( set "MODEL_FILE=!E2B_FILE!" & set "MODEL_NAME=Gemma 4 E2B" )
 if not defined MODEL_FILE if "!HAS_E4B!"=="1" ( set "MODEL_FILE=!E4B_FILE!" & set "MODEL_NAME=Gemma 4 E4B" )
@@ -330,10 +338,15 @@ if "!HAS_31B!"=="1" (
 ) else (
     echo    Gemma 4 31B    [not downloaded]
 )
-if "!HAS_MMPROJ!"=="1" (
-    echo    Vision model   [OK]
+if "!HAS_MMPROJ_E2B!"=="1" (
+    echo    Vision E2B     [OK]
 ) else (
-    echo    Vision model   [not downloaded]
+    echo    Vision E2B     [not downloaded]
+)
+if "!HAS_MMPROJ_E4B!"=="1" (
+    echo    Vision E4B     [OK]
+) else (
+    echo    Vision E4B     [not downloaded]
 )
 echo.
 echo  Available downloads:
@@ -345,7 +358,8 @@ if "!IS_FAT32!"=="1" (
 ) else (
     echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM
 )
-echo    [4]  Vision model   ~941 MB   image/audio input support
+echo    [4]  Vision E2B     ~941 MB   image/audio for E2B
+echo    [5]  Vision E4B     ~990 MB   image/audio for E4B
 echo.
 echo    [0]  Back
 echo.
@@ -354,7 +368,8 @@ set /p "DC=  > "
 if "!DC!"=="1" goto :download_e2b
 if "!DC!"=="2" goto :download_e4b
 if "!DC!"=="3" goto :download_31b
-if "!DC!"=="4" goto :download_mmproj
+if "!DC!"=="4" goto :download_mmproj_e2b
+if "!DC!"=="5" goto :download_mmproj_e4b
 goto :main_menu
 
 :download_e2b
@@ -373,7 +388,7 @@ if errorlevel 1 (
     set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf"
     echo.
     echo  [OK] Gemma 4 E2B downloaded!
-    if "!HAS_MMPROJ!"=="0" goto :offer_mmproj
+    if "!HAS_MMPROJ_E2B!"=="0" goto :offer_mmproj_e2b
 )
 echo.
 echo  Press any key...
@@ -396,7 +411,7 @@ if errorlevel 1 (
     set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
     echo.
     echo  [OK] Gemma 4 E4B downloaded!
-    if "!HAS_MMPROJ!"=="0" goto :offer_mmproj
+    if "!HAS_MMPROJ_E4B!"=="0" goto :offer_mmproj_e4b
 )
 echo.
 echo  Press any key...
@@ -433,13 +448,13 @@ echo  Press any key...
 pause >nul
 goto :download_menu
 
-:offer_mmproj
+:offer_mmproj_e2b
 echo.
 echo  --------------------------------------------
-echo  Vision model enables image/audio input (~941 MB).
+echo  Vision model for E2B enables image/audio input (~941 MB).
 echo.
 set "DV="
-set /p "DV=  Download vision model now? [y/n] > "
+set /p "DV=  Download vision model for E2B now? [y/n] > "
 if /i not "!DV!"=="y" (
     echo.
     echo  Skipped. You can download it later from [4] Download models.
@@ -449,10 +464,10 @@ if /i not "!DV!"=="y" (
     goto :download_menu
 )
 
-:download_mmproj
+:download_mmproj_e2b
 if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
-echo  Downloading Vision model (mmproj)...
+echo  Downloading Vision model for E2B (mmproj)...
 echo  Source: huggingface.co/ggml-org/gemma-4-E2B-it-GGUF
 echo.
 curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-e2b-it-f16.gguf?download=true"
@@ -462,8 +477,47 @@ if errorlevel 1 (
     del "%MODELS%\gemma-4-e2b-mmproj.gguf" 2>nul
 ) else (
     set "HAS_MMPROJ=1"
+    set "HAS_MMPROJ_E2B=1"
     echo.
-    echo  [OK] Vision model downloaded!
+    echo  [OK] Vision model for E2B downloaded!
+)
+echo.
+echo  Press any key...
+pause >nul
+goto :download_menu
+
+:offer_mmproj_e4b
+echo.
+echo  --------------------------------------------
+echo  Vision model for E4B enables image/audio input (~990 MB).
+echo.
+set "DV="
+set /p "DV=  Download vision model for E4B now? [y/n] > "
+if /i not "!DV!"=="y" (
+    echo.
+    echo  Skipped. You can download it later from [5] Download models.
+    echo.
+    echo  Press any key...
+    pause >nul
+    goto :download_menu
+)
+
+:download_mmproj_e4b
+if not exist "%MODELS%" mkdir "%MODELS%"
+echo.
+echo  Downloading Vision model for E4B (mmproj)...
+echo  Source: huggingface.co/ggml-org/gemma-4-E4B-it-GGUF
+echo.
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e4b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-e4b-it-f16.gguf?download=true"
+if errorlevel 1 (
+    echo.
+    echo  [X] Download failed. Check your internet connection.
+    del "%MODELS%\gemma-4-e4b-mmproj.gguf" 2>nul
+) else (
+    set "HAS_MMPROJ=1"
+    set "HAS_MMPROJ_E4B=1"
+    echo.
+    echo  [OK] Vision model for E4B downloaded!
 )
 echo.
 echo  Press any key...
@@ -495,23 +549,31 @@ if not exist "!MODEL_PATH!" (
 :: Build extra args
 set "EXTRA_ARGS="
 
-:: Multimodal (E-series models only, detected by MODEL_NAME)
-:: Only use mmproj if file exists and is larger than 100 MB (to skip corrupt/incomplete downloads)
-set "MMPROJ_PATH=%MODELS%\!MMPROJ_FILE!"
-set "MMPROJ_OK=0"
-if exist "!MMPROJ_PATH!" (
-    for %%A in ("!MMPROJ_PATH!") do (
-        if %%~zA GTR 100000000 set "MMPROJ_OK=1"
-    )
-)
-if "!MMPROJ_OK!"=="1" (
-    if "!MODEL_NAME!"=="Gemma 4 E2B" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
-    if "!MODEL_NAME!"=="Gemma 4 E4B" set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
-) else (
+:: Multimodal — select the correct mmproj for the chosen model
+:: Each model needs its own mmproj (E2B and E4B have different embedding sizes)
+set "MMPROJ_FILE="
+if "!MODEL_NAME!"=="Gemma 4 E2B" set "MMPROJ_FILE=!MMPROJ_E2B!"
+if "!MODEL_NAME!"=="Gemma 4 E4B" set "MMPROJ_FILE=!MMPROJ_E4B!"
+
+if defined MMPROJ_FILE (
+    set "MMPROJ_PATH=%MODELS%\!MMPROJ_FILE!"
+    set "MMPROJ_OK=0"
     if exist "!MMPROJ_PATH!" (
-        echo  [!] Vision model file seems corrupt or incomplete, skipping.
-        echo      Re-download it from [4] Download models.
-        echo.
+        for %%A in ("!MMPROJ_PATH!") do (
+            if %%~zA GTR 100000000 set "MMPROJ_OK=1"
+        )
+    )
+    if "!MMPROJ_OK!"=="1" (
+        set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+    ) else (
+        if exist "!MMPROJ_PATH!" (
+            echo  [!] Vision model file seems corrupt or incomplete, skipping.
+            echo      Re-download it from Download models menu.
+            echo.
+        ) else (
+            echo  [i] No vision model for !MODEL_NAME!. Download it for image/audio support.
+            echo.
+        )
     )
 )
 
