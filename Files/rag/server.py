@@ -51,6 +51,7 @@ INJECT_JS = Path(__file__).resolve().parent / "inject.js"
 CHUNKS_FILE = INDEX_DIR / "chunks.json"
 INDEX_FILE = INDEX_DIR / "bm25_index.json"
 META_FILE = INDEX_DIR / "meta.json"
+SYSTEM_PROMPT_FILE = BASE_DIR / "config" / "system_prompt.txt"
 
 # ============================================================
 #  Global State
@@ -65,6 +66,19 @@ chunks = []          # list of {"id", "text", "source", "offset"}
 index_meta = {}      # {"doc_count", "chunk_count", "indexed_at", "files"}
 
 MAX_TOOL_ROUNDS = 3  # Max tool call iterations per request
+system_prompt = ""   # Loaded from system_prompt.txt at startup
+
+
+def load_system_prompt():
+    """Load system prompt from file. Returns empty string if file missing."""
+    try:
+        return SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        print("  [WARN] system_prompt.txt not found — no system prompt")
+        return ""
+    except Exception as e:
+        print(f"  [WARN] Cannot read system_prompt.txt: {e}")
+        return ""
 
 LLAMA_HOST = "127.0.0.1"
 LLAMA_PORT = 8080
@@ -717,6 +731,13 @@ class RAGHandler(BaseHTTPRequestHandler):
             self._proxy_raw_post(body)
             return
 
+        # Inject system prompt (if loaded)
+        if system_prompt:
+            messages = data.get("messages", [])
+            # Prepend as first system message
+            messages.insert(0, {"role": "system", "content": system_prompt})
+            data["messages"] = messages
+
         # Augment messages if RAG is on
         if rag_enabled and bm25 is not None:
             data["messages"] = augment_messages(data.get("messages", []))
@@ -744,16 +765,6 @@ class RAGHandler(BaseHTTPRequestHandler):
         data["tools"] = tools_defs
         tool_calls_log = []  # Track what tools were called for UI
         url = f"http://{LLAMA_HOST}:{LLAMA_PORT}/v1/chat/completions"
-
-        # Hint: call ALL needed tools at once to minimize slow round-trips
-        messages = data.get("messages", [])
-        messages.insert(0, {
-            "role": "system",
-            "content": (
-                "IMPORTANT: When using tools, call ALL the tools you need in a SINGLE response. "
-                "Do NOT call tools one at a time. Batch all tool calls together."
-            ),
-        })
 
         for round_num in range(MAX_TOOL_ROUNDS):
             # Intermediate rounds: no streaming, no reasoning, short output
@@ -1200,6 +1211,14 @@ def main():
     # Ensure directories exist
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Load system prompt
+    global system_prompt
+    system_prompt = load_system_prompt()
+    if system_prompt:
+        print(f"  [SYSTEM] Loaded system prompt ({len(system_prompt)} chars)")
+    else:
+        print(f"  [SYSTEM] No system prompt configured")
 
     # Load existing index
     if load_index():
