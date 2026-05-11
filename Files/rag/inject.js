@@ -591,6 +591,67 @@
         pollStatus();
         loadFiles();
         pollTimer = setInterval(pollStatus, 5000);
+
+        // Activate sterile-mode cleanup — wipes browser storage on close
+        setupSterileMode();
+    }
+
+    // ========== Sterile Mode ==========
+    // Wipes all client-side storage when the user closes the tab/browser.
+    // Goal: nothing about USBClaw should remain on the host PC after the
+    // USB stick is unplugged. Chat history, settings, etc. live only for
+    // the active browser session.
+    function setupSterileMode() {
+        const cleanup = () => {
+            // 1. localStorage / sessionStorage
+            try { localStorage.clear(); } catch (e) {}
+            try { sessionStorage.clear(); } catch (e) {}
+
+            // 2. IndexedDB — fire delete requests for every DB on this origin.
+            //    indexedDB.databases() is supported in Chromium-based browsers
+            //    (Edge, Chrome) and recent Firefox. Fire-and-forget; the
+            //    requests are queued before the page actually unloads.
+            try {
+                if (typeof indexedDB.databases === 'function') {
+                    indexedDB.databases().then((dbs) => {
+                        (dbs || []).forEach((db) => {
+                            if (db && db.name) {
+                                try { indexedDB.deleteDatabase(db.name); } catch (e) {}
+                            }
+                        });
+                    }).catch(() => {});
+                }
+            } catch (e) {}
+
+            // 3. Cookies for current origin
+            try {
+                document.cookie.split(';').forEach((c) => {
+                    const eq = c.indexOf('=');
+                    const name = (eq > -1 ? c.substr(0, eq) : c).trim();
+                    if (name) {
+                        document.cookie = name +
+                            '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                    }
+                });
+            } catch (e) {}
+
+            // 4. Cache Storage API (Service Worker caches, if any)
+            try {
+                if (window.caches && caches.keys) {
+                    caches.keys().then((keys) => {
+                        keys.forEach((k) => { try { caches.delete(k); } catch (e) {} });
+                    }).catch(() => {});
+                }
+            } catch (e) {}
+        };
+
+        // beforeunload fires on tab close, navigation away, browser close.
+        // pagehide is the more modern, reliable alternative (also fires on
+        // mobile backgrounding) — register both for maximum coverage.
+        window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('pagehide', cleanup);
+
+        console.log('[USBClaw] Sterile mode active — browser storage will be wiped on close.');
     }
 
     // ========== File Management ==========

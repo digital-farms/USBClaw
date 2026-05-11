@@ -37,12 +37,16 @@ set "MODEL_NAME="
 set "THINK_LABEL=OFF"
 
 :: =============================================
-::  Git safe.directory (USB drives need this)
+::  Sterile mode: keep host PC clean
 :: =============================================
-where git >nul 2>&1
-if not errorlevel 1 (
-    git config --global --add safe.directory "%BASE:~0,-1%" >nul 2>&1
-)
+:: Note: we intentionally do NOT run `git config --global` here.
+:: That would write to %USERPROFILE%\.gitconfig and leave a trace
+:: on every PC the USB is plugged into. The .bat doesn't need git
+:: at runtime — git is only used by the user to clone the repo.
+
+:: Local tmp directory on the USB stick (so we never touch %TEMP% on host)
+set "TMP_DIR=%FILES%tmp"
+if not exist "!TMP_DIR!" mkdir "!TMP_DIR!" >nul 2>&1
 
 :: =============================================
 ::  System check
@@ -67,12 +71,33 @@ if not exist "%LLAMA%" (
     exit /b 1
 )
 
-:: Check Python
-where python >nul 2>&1
-if not errorlevel 1 (
-    for /f "delims=" %%P in ('where python 2^>nul') do (
-        if not defined PYTHON set "PYTHON=%%P"
+:: Check Python — prefer bundled portable version on the USB drive,
+:: fall back to system-installed Python.
+:: Bundled Python is expected at: Files\python\python.exe (embeddable distribution)
+set "PORTABLE_PY=%FILES%python\python.exe"
+if exist "!PORTABLE_PY!" (
+    set "PYTHON=!PORTABLE_PY!"
+) else (
+    where python >nul 2>&1
+    if not errorlevel 1 (
+        for /f "delims=" %%P in ('where python 2^>nul') do (
+            if not defined PYTHON set "PYTHON=%%P"
+        )
     )
+)
+
+:: Keep host PC clean: don't write .pyc files anywhere outside the USB drive
+set "PYTHONDONTWRITEBYTECODE=1"
+:: Force UTF-8 I/O for embeddable Python (Windows default is cp1252)
+set "PYTHONIOENCODING=utf-8"
+
+:: ---- First-time setup: auto-install portable Python in the background ----
+:: If no Python is available AND we have internet, silently download the
+:: portable distribution to the USB drive. After this one-time step, the
+:: USB is fully self-contained and works on any offline PC.
+if not defined PYTHON (
+    curl.exe -s --max-time 3 -o NUL -I "https://www.python.org" >nul 2>&1
+    if not errorlevel 1 call :auto_install_python
 )
 
 :: Detect models (support both original HF names and short names)
@@ -126,9 +151,13 @@ echo.
 echo  System:
 echo    llama-server  OK
 if defined PYTHON (
-    echo    Python        OK  - RAG enabled
+    if exist "!PORTABLE_PY!" (
+        echo    Python        OK  - portable [Files\python]
+    ) else (
+        echo    Python        OK  - system
+    )
 ) else (
-    echo    Python        --  - RAG disabled
+    echo    Python        --  - RAG/tools disabled  [4] Download portable Python
 )
 echo.
 echo  --------------------------------------------
@@ -361,6 +390,12 @@ if "!IS_FAT32!"=="1" (
 echo    [4]  Vision E2B     ~941 MB   image/audio for E2B
 echo    [5]  Vision E4B     ~990 MB   image/audio for E4B
 echo.
+if exist "!PORTABLE_PY!" (
+    echo    [p]  Portable Python  [OK]  required for RAG/tools
+) else (
+    echo    [p]  Portable Python  ~10 MB  enables RAG and system tools
+)
+echo.
 echo    [0]  Back
 echo.
 set "DC="
@@ -370,6 +405,7 @@ if "!DC!"=="2" goto :download_e4b
 if "!DC!"=="3" goto :download_31b
 if "!DC!"=="4" goto :download_mmproj_e2b
 if "!DC!"=="5" goto :download_mmproj_e4b
+if /i "!DC!"=="p" goto :download_python
 goto :main_menu
 
 :download_e2b
@@ -525,6 +561,106 @@ pause >nul
 goto :download_menu
 
 :: =============================================
+::  Portable Python (embeddable) — core installer
+:: =============================================
+:: Callable sub-routine. Sets PYTHON on success, leaves it empty on failure.
+:: Caller is responsible for printing context (or staying silent for auto-mode).
+:: Args: %1 = "auto" for silent (first-time setup) or "manual" for verbose.
+:auto_install_python
+setlocal EnableDelayedExpansion
+set "PY_MODE=%~1"
+if "!PY_MODE!"=="" set "PY_MODE=auto"
+set "PY_VER=3.11.9"
+set "PY_ZIP_URL=https://www.python.org/ftp/python/!PY_VER!/python-!PY_VER!-embed-amd64.zip"
+set "PY_DEST=%FILES%python"
+set "PY_TMP=%FILES%python_dl.zip"
+
+if "!PY_MODE!"=="auto" (
+    echo.
+    echo  --------------------------------------------
+    echo   First-time setup: installing portable Python ~10 MB
+    echo   This happens once - the USB will work offline afterwards.
+    echo  --------------------------------------------
+)
+
+if not exist "!PY_DEST!" mkdir "!PY_DEST!" >nul 2>&1
+
+curl.exe -L --progress-bar -f -o "!PY_TMP!" "!PY_ZIP_URL!"
+if errorlevel 1 (
+    if "!PY_MODE!"=="manual" echo  [X] Download failed.
+    del "!PY_TMP!" 2>nul
+    endlocal
+    exit /b 1
+)
+
+tar.exe -xf "!PY_TMP!" -C "!PY_DEST!" 2>nul
+if errorlevel 1 (
+    powershell -NoProfile -Command "Expand-Archive -LiteralPath '!PY_TMP!' -DestinationPath '!PY_DEST!' -Force" 2>nul
+    if errorlevel 1 (
+        if "!PY_MODE!"=="manual" echo  [X] Extraction failed.
+        del "!PY_TMP!" 2>nul
+        endlocal
+        exit /b 1
+    )
+)
+del "!PY_TMP!" 2>nul
+
+if not exist "!PY_DEST!\python.exe" (
+    if "!PY_MODE!"=="manual" echo  [X] python.exe not found after extraction.
+    endlocal
+    exit /b 1
+)
+
+if "!PY_MODE!"=="auto" (
+    echo  [OK] Portable Python ready. RAG and System Tools enabled.
+    timeout /t 1 >nul
+)
+endlocal
+:: Propagate PYTHON path to caller scope
+set "PYTHON=%PORTABLE_PY%"
+exit /b 0
+
+:: =============================================
+::  Download Portable Python — menu entry
+:: =============================================
+:download_python
+echo.
+echo  --------------------------------------------
+echo  Portable Python (embeddable distribution)
+echo  Source: python.org   ~10 MB
+echo  Installs to: Files\python\
+echo  --------------------------------------------
+echo.
+
+if exist "!PORTABLE_PY!" (
+    echo  [i] Portable Python is already installed.
+    set "REPL="
+    set /p "REPL=  Reinstall / overwrite? [y/n] > "
+    if /i not "!REPL!"=="y" (
+        echo  Cancelled.
+        echo.
+        echo  Press any key...
+        pause >nul
+        goto :download_menu
+    )
+    echo  Removing existing installation...
+    rmdir /S /Q "%FILES%python" 2>nul
+)
+
+call :auto_install_python manual
+if errorlevel 1 (
+    echo.
+    echo  Press any key...
+    pause >nul
+    goto :download_menu
+)
+echo  [OK] Portable Python installed.
+echo.
+echo  Press any key...
+pause >nul
+goto :download_menu
+
+:: =============================================
 ::  Pre-launch checks
 :: =============================================
 :pre_launch
@@ -580,8 +716,8 @@ if defined MMPROJ_FILE (
 :: Reasoning is now controlled dynamically by the RAG proxy (inject.js toggle button)
 :: No need for --reasoning flag here
 
-:: Check port
-set "NSTMP=%TEMP%\llama_ns.tmp"
+:: Check port (use tmp on the USB drive, not on host PC)
+set "NSTMP=!TMP_DIR!\llama_ns.tmp"
 netstat -an > "!NSTMP!" 2>nul
 findstr ":%PORT%" "!NSTMP!" >nul 2>&1
 if not errorlevel 1 (
@@ -641,17 +777,36 @@ echo.
 
 start "llama-server" cmd /k ""%LLAMA%" --host %HOST% --port %PORT% -m "!MODEL_PATH!" -c %CTX% !EXTRA_ARGS!"
 
-echo  Loading model...
-echo  This may take 15-60 seconds depending on your drive.
+echo  Loading model (may take up to ~2 min on slow USB drives)...
 echo.
 
-:: Animated wait
-for /L %%i in (1,1,15) do (
-    <nul set /p "=."
-    timeout /t 1 >nul
-)
+:: Wait for llama-server /health to return 200 (model fully loaded)
+set /a "_TRIES=0"
+set "_MAX_TRIES=180"
+:health_wait
+set /a "_TRIES+=1"
+curl.exe -sf -o NUL --max-time 2 "http://%HOST%:%PORT%/health" >nul 2>&1
+if not errorlevel 1 goto :model_ready
+<nul set /p "=."
+if !_TRIES! GEQ !_MAX_TRIES! goto :model_timeout
+timeout /t 1 >nul
+goto :health_wait
+
+:model_timeout
 echo.
 echo.
+echo  [!] Model did not become ready within !_MAX_TRIES! seconds.
+echo      Check the "llama-server" window for errors.
+echo      Continuing anyway - server may still come up.
+echo.
+goto :after_load
+
+:model_ready
+echo.
+echo  [OK] Model loaded and ready.
+echo.
+
+:after_load
 
 :: Start RAG proxy
 if defined PYTHON (

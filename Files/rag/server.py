@@ -1090,9 +1090,70 @@ class RAGHandler(BaseHTTPRequestHandler):
             self.wfile.write(content)
 
         except (URLError, HTTPError) as e:
-            self._send_error(502, f"Cannot reach llama-server: {e}")
+            # If upstream isn't ready yet and the client is a browser
+            # navigating to a page, serve a friendly loading screen instead
+            # of a raw 502 JSON error. Browser auto-refreshes every 2 sec.
+            if self._is_browser_navigation():
+                self._serve_loading_page()
+            else:
+                self._send_error(502, f"Cannot reach llama-server: {e}")
         except Exception as e:
             self._send_error(500, str(e))
+
+    def _is_browser_navigation(self):
+        """Heuristic: is this GET a top-level browser navigation expecting HTML?"""
+        accept = self.headers.get("Accept", "")
+        if "text/html" in accept:
+            return True
+        # Root path or no extension - likely page navigation
+        path = self.path.split("?", 1)[0]
+        if path in ("", "/"):
+            return True
+        return False
+
+    def _serve_loading_page(self):
+        """Friendly HTML page shown while llama-server is still loading the model."""
+        html = (
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n<head>\n"
+            "<meta charset=\"utf-8\">\n"
+            "<meta http-equiv=\"refresh\" content=\"2\">\n"
+            "<title>USBClaw - Loading model...</title>\n"
+            "<style>\n"
+            "  html,body{height:100%;margin:0;background:#0d0d14;color:#e0e0e0;"
+            "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}\n"
+            "  .wrap{display:flex;align-items:center;justify-content:center;height:100%;}\n"
+            "  .box{text-align:center;padding:32px 40px;border:1px solid #2a2a3a;"
+            "border-radius:16px;background:#111118;box-shadow:0 8px 32px rgba(0,0,0,.5);"
+            "max-width:420px;}\n"
+            "  h1{margin:0 0 8px;font-size:20px;font-weight:600;color:#e0e0e0;}\n"
+            "  p{margin:6px 0;font-size:13px;color:#888;line-height:1.5;}\n"
+            "  .sp{display:inline-block;width:38px;height:38px;border:3px solid #2a2a3a;"
+            "border-top-color:#4ade80;border-radius:50%;animation:spin 1s linear infinite;"
+            "margin:18px 0 6px;}\n"
+            "  @keyframes spin{to{transform:rotate(360deg);}}\n"
+            "  .small{font-size:11px;color:#555;margin-top:14px;}\n"
+            "</style>\n</head>\n<body>\n"
+            "<div class=\"wrap\"><div class=\"box\">\n"
+            "<div class=\"sp\"></div>\n"
+            "<h1>Loading model...</h1>\n"
+            "<p>The AI model is being loaded into memory.</p>\n"
+            "<p>This may take 15-120 seconds depending on your USB drive speed.</p>\n"
+            "<p class=\"small\">This page will reload automatically.</p>\n"
+            "</div></div>\n</body>\n</html>\n"
+        )
+        body = html.encode("utf-8")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _proxy_post(self):
         """Proxy POST request to llama-server."""

@@ -9,6 +9,16 @@ Files/data/index/*
 __pycache__/
 *.pyc
 
+# Portable Python (embeddable distribution, downloaded via menu)
+Files/python/
+
+# Temp directory (kept on USB, not on host)
+Files/tmp/
+
+# Browser/chat profile directory (will be added with sterile-mode feature)
+Files/data/chats/*
+!Files/data/chats/.gitkeep
+
 # OS junk
 Thumbs.db
 .DS_Store

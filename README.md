@@ -69,7 +69,10 @@ For image and audio input, download the multimodal projector:
 - **Windows 10+**
 - **4+ GB RAM** (8+ for E4B, 20+ for 31B)
 - USB flash drive formatted as **exFAT** (FAT32 has 4 GB file limit)
-- **Python 3.10+** (optional, only for RAG feature)
+- **Python 3.10+** — optional, needed for RAG / system tools / system prompt.
+  Install it system-wide, **or** use the built-in portable distribution:
+  Launcher menu **[4] Download models → [p] Portable Python** (~10 MB,
+  unpacks to `Files\python\`, fully self-contained, leaves no trace on host PC).
 
 ## Project Structure
 
@@ -79,6 +82,7 @@ USBClaw/
 ├── Files/
 │   ├── llama/
 │   │   └── win/               llama-server.exe + DLLs
+│   ├── python/                Portable Python (optional, via launcher menu)
 │   ├── models/
 │   │   ├── gemma-4-e2b.gguf   E2B model
 │   │   ├── gemma-4-e4b.gguf   E4B model (optional)
