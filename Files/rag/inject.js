@@ -348,6 +348,10 @@
                     ' messages) — reloading to refresh UI.');
                 // Close DB before reload so WebUI is not blocked.
                 try { db.close(); } catch (_) {}
+                // Mark that WE are triggering the reload — sterile-mode
+                // cleanup listens for this flag and skips the wipe so that
+                // sessionStorage (including SEEDED_FLAG) survives the reload.
+                window._usbclawReloading = true;
                 location.reload();
                 return;
             }
@@ -958,10 +962,18 @@
     //   1. Flush the latest localStorage snapshot to USB via sendBeacon
     //      (synchronous-by-spec; survives the unload).
     //   2. Wipe the host PC's browser storage so nothing remains locally.
-    // Next time you plug the USB into ANY PC and open USBClaw, chats are
-    // restored from USB by the sync-XHR seeder at the top of this file.
     function setupSterileMode() {
         const cleanup = () => {
+            // Guard: if this unload is triggered by our own location.reload()
+            // inside restoreIDBFromUSB, we must NOT wipe sessionStorage
+            // (contains SEEDED_FLAG), localStorage, or IndexedDB — otherwise
+            // the flag is lost and restore runs again on the reloaded page,
+            // causing an infinite reload loop.
+            if (window._usbclawReloading) {
+                console.log('[USBClaw] Sterile cleanup skipped — this is our own reload.');
+                return;
+            }
+
             // 0. Persist final snapshot to USB before wiping (best-effort).
             //    IDB is async — we can't dump it during unload. Fall back to
             //    `lastIdbDump`, which is refreshed by the debounced save on
@@ -997,34 +1009,30 @@
                 }
             } catch (e) {}
 
-            // 3. Cookies for current origin
+            // 3. Cookies (same-origin only — can't touch third-party)
             try {
                 document.cookie.split(';').forEach((c) => {
-                    const eq = c.indexOf('=');
-                    const name = (eq > -1 ? c.substr(0, eq) : c).trim();
-                    if (name) {
-                        document.cookie = name +
-                            '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
-                    }
+                    const [name] = c.split('=');
+                    const eqPos = c.indexOf('=');
+                    const cookieName = eqPos > -1 ? c.substr(0, eqPos).trim() : c.trim();
+                    document.cookie = cookieName + '=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;';
                 });
             } catch (e) {}
 
-            // 4. Cache Storage API (Service Worker caches, if any)
+            // 4. Service workers & caches
             try {
-                if (window.caches && caches.keys) {
-                    caches.keys().then((keys) => {
-                        keys.forEach((k) => { try { caches.delete(k); } catch (e) {} });
+                if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage('CLEAR_CACHES');
+                }
+                if (typeof caches === 'object') {
+                    caches.keys().then((names) => {
+                        names.forEach((n) => { try { caches.delete(n); } catch (e) {} });
                     }).catch(() => {});
                 }
             } catch (e) {}
         };
-
-        // beforeunload fires on tab close, navigation away, browser close.
-        // pagehide is the more modern, reliable alternative (also fires on
-        // mobile backgrounding) — register both for maximum coverage.
         window.addEventListener('beforeunload', cleanup);
         window.addEventListener('pagehide', cleanup);
-
         console.log('[USBClaw] Sterile mode active — browser storage will be wiped on close.');
     }
 

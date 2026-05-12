@@ -539,10 +539,12 @@ class RAGHandler(BaseHTTPRequestHandler):
         self._send_json(200, {})
 
     def _handle_storage_save(self):
-        """Atomically persist a JSON snapshot of browser localStorage to USB.
+        """Atomically persist a JSON snapshot to USB.
 
-        Accepts both regular POST and sendBeacon (which sets text/plain).
-        Writes via temp file + replace to avoid corruption on USB removal.
+        Accepts both regular POST and sendBeacon. Writes via temp file +
+        replace. On Windows `os.replace` can fail with WinError 32 when
+        the target file is locked by an anti-virus or indexer — we retry
+        with exponential backoff up to 6 attempts (~2.5 s total).
         """
         try:
             length = int(self.headers.get("Content-Length", "0") or "0")
@@ -558,9 +560,33 @@ class RAGHandler(BaseHTTPRequestHandler):
             STORAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
             tmp = STORAGE_FILE.with_suffix(".json.tmp")
             tmp.write_bytes(raw)
-            os.replace(tmp, STORAGE_FILE)
-            # Diagnostic: report what we just saved so the user can see in the
-            # terminal that chats really do reach the USB drive.
+
+            # Retry loop for Windows file-lock races (AV, search indexer)
+            last_err = None
+            for attempt in range(6):
+                try:
+                    os.replace(tmp, STORAGE_FILE)
+                    break
+                except (OSError, PermissionError) as e:
+                    last_err = e
+                    # WinError 32 = ERROR_SHARING_VIOLATION; errno 13 on some paths
+                    if attempt < 5:
+                        sleep_ms = 50 * (2 ** attempt)  # 50, 100, 200, 400, 800, 1600
+                        time.sleep(sleep_ms / 1000.0)
+                    else:
+                        raise last_err
+            else:
+                raise last_err
+
+            # Clean up any stale tmp files left by previous failed attempts
+            try:
+                stale = STORAGE_FILE.with_suffix(".json.tmp")
+                if stale.exists():
+                    stale.unlink()
+            except Exception:
+                pass
+
+            # Diagnostic
             try:
                 idb = parsed.get("idb", {}) if isinstance(parsed, dict) else {}
                 ls = parsed.get("localStorage", {}) if isinstance(parsed, dict) else {}
