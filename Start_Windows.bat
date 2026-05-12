@@ -484,7 +484,7 @@ goto :download_menu
 :dl_mmproj_e2b
 echo.
 echo  Downloading vision module for E2B  ~941 MB ...
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-e2b-it-f16.gguf?download=true"
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-bf16.gguf?download=true"
 if errorlevel 1 goto :dl_mmproj_e2b_fail
 set "HAS_MMPROJ=1"
 set "HAS_MMPROJ_E2B=1"
@@ -497,8 +497,8 @@ exit /b 1
 
 :dl_mmproj_e4b
 echo.
-echo  Downloading vision module for E4B  ~990 MB ...
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e4b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-e4b-it-f16.gguf?download=true"
+echo  Downloading vision module for E4B  ~945 MB ...
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e4b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-E4B-it-bf16.gguf?download=true"
 if errorlevel 1 goto :dl_mmproj_e4b_fail
 set "HAS_MMPROJ=1"
 set "HAS_MMPROJ_E4B=1"
