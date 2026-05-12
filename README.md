@@ -63,6 +63,30 @@ For image and audio input, download the multimodal projector:
 - **RAG** — document icon in browser, upload local docs for context-aware answers (requires Python)
 - **Download models** — built-in downloader in the launcher menu
 - **Context size** — adjustable from 2048 to 16384 tokens
+- **Sterile mode** — browser storage (chats, cookies, cache) is wiped automatically on close, no traces left on host PC
+
+## ⚠ Uncensored models
+
+USBClaw can optionally download and run **uncensored** Gemma 4 variants
+([HauhauCS Aggressive abliterated builds](https://huggingface.co/HauhauCS)).
+These models have safety alignment removed and will generate **any** content
+you request — including content that may be illegal in your jurisdiction,
+harmful, offensive, or factually false.
+
+**By using uncensored models you accept full responsibility for everything
+you generate, request, store, and share.** The project authors provide this
+capability as-is and are NOT liable for your use.
+
+Access:
+1. Launcher → `[4] Download models` → `[u]` Uncensored models.
+2. First entry shows a consent screen — type `I ACCEPT` to proceed.
+3. Consent + every download + every launch are recorded with HMAC-signed
+   timestamps in `Files/data/uncensored_consent.log` (on the USB drive only —
+   never written to the host PC). You can revoke consent any time via
+   `[r]` in the same menu, which deletes the log.
+
+When an uncensored model is loaded, the browser UI shows a permanent
+red banner at the top of every page so you always know the current mode.
 
 ## Requirements
 

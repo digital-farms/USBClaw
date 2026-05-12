@@ -654,6 +654,95 @@
         console.log('[USBClaw] Sterile mode active — browser storage will be wiped on close.');
     }
 
+    // ========== Uncensored Banner ==========
+    // Red banner shown at the top of the WebUI whenever an abliterated /
+    // uncensored model is loaded. Can be dismissed for the current session
+    // via the × close button. Sterile mode wipes the dismissal on tab close,
+    // so the banner reappears next session. Adds top padding to <body> while
+    // visible so existing UI isn't covered.
+    const UNCENSORED_DISMISS_KEY = 'usbclaw_uncensored_banner_dismissed';
+
+    function ensureUncensoredBanner(visible) {
+        let banner = document.getElementById('usbclaw-uncensored-banner');
+        const dismissed = sessionStorage.getItem(UNCENSORED_DISMISS_KEY) === '1';
+        const shouldShow = visible && !dismissed;
+
+        if (!shouldShow) {
+            if (banner) {
+                banner.remove();
+                document.body.style.paddingTop = '';
+            }
+            return;
+        }
+        if (banner) return; // already shown
+
+        // Inject styles once
+        if (!document.getElementById('usbclaw-uncensored-style')) {
+            const style = document.createElement('style');
+            style.id = 'usbclaw-uncensored-style';
+            style.textContent = `
+                #usbclaw-uncensored-banner {
+                    position: fixed;
+                    top: 0; left: 0; right: 0;
+                    z-index: 2147483647;
+                    background: linear-gradient(90deg, #7f1d1d, #b91c1c, #7f1d1d);
+                    color: #fff5f5;
+                    font: 600 12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+                    text-align: center;
+                    padding: 7px 36px 7px 14px;
+                    letter-spacing: 0.3px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+                    border-bottom: 1px solid #fca5a5;
+                    user-select: none;
+                }
+                #usbclaw-uncensored-banner b {
+                    color: #fee2e2;
+                    letter-spacing: 1px;
+                }
+                #usbclaw-uncensored-close {
+                    position: absolute;
+                    top: 50%; right: 8px;
+                    transform: translateY(-50%);
+                    background: rgba(0,0,0,0.25);
+                    border: 1px solid rgba(255,255,255,0.3);
+                    color: #fff5f5;
+                    width: 22px; height: 22px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font: 700 14px/1 sans-serif;
+                    display: flex; align-items: center; justify-content: center;
+                    padding: 0;
+                }
+                #usbclaw-uncensored-close:hover {
+                    background: rgba(0,0,0,0.5);
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        banner = document.createElement('div');
+        banner.id = 'usbclaw-uncensored-banner';
+        banner.innerHTML =
+            '\u26A0  <b>UNCENSORED MODEL ACTIVE</b>  \u2014  ' +
+            'content is unfiltered. You are responsible for what you generate, ' +
+            'request, store, and share.' +
+            '<button id="usbclaw-uncensored-close" title="Hide for this session">\u00D7</button>';
+        document.body.appendChild(banner);
+
+        const closeBtn = document.getElementById('usbclaw-uncensored-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                sessionStorage.setItem(UNCENSORED_DISMISS_KEY, '1');
+                banner.remove();
+                document.body.style.paddingTop = '';
+            });
+        }
+
+        // Push the WebUI down so the banner doesn't overlap header
+        const h = banner.offsetHeight || 30;
+        document.body.style.paddingTop = h + 'px';
+    }
+
     // ========== File Management ==========
     async function loadFiles() {
         const listEl = document.getElementById('rag-file-list');
@@ -813,6 +902,11 @@
         const toolsEnabledCb = document.getElementById('tools-enabled-cb');
         const statusText = document.getElementById('rag-status-text');
         const toolsStatusText = document.getElementById('tools-status-text');
+
+        // Uncensored banner — always visible at the top of the page when an
+        // abliterated model is loaded. Pushes the body content down so it can
+        // never be missed or hidden by the WebUI's own header.
+        ensureUncensoredBanner(!!ragStatus.is_uncensored);
 
         if (!toggleBtn) return;
 

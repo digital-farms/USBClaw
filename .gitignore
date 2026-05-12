@@ -19,6 +19,9 @@ Files/tmp/
 Files/data/chats/*
 !Files/data/chats/.gitkeep
 
+# Uncensored consent log (per-USB, never committed)
+Files/data/uncensored_consent.log
+
 # OS junk
 Thumbs.db
 .DS_Store

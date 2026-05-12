@@ -100,16 +100,33 @@ if not defined PYTHON (
     if not errorlevel 1 call :auto_install_python
 )
 
-:: Detect models (support both original HF names and short names)
+:: Uncensored consent log path
+set "CONSENT_LOG=%FILES%data\uncensored_consent.log"
+
+:: Detect models — both standard (Gemma 4 official) and uncensored (HauhauCS).
+:: Standard models keep their HF naming; uncensored models keep verbatim
+:: HauhauCS naming so they're always visually distinct.
+call :detect_models
+goto :after_detect
+
+:detect_models
 set "HAS_E2B=0"
 set "HAS_E4B=0"
 set "HAS_31B=0"
 set "HAS_MMPROJ=0"
 set "HAS_MMPROJ_E2B=0"
 set "HAS_MMPROJ_E4B=0"
+set "HAS_UNC_E2B=0"
+set "HAS_UNC_E4B=0"
+set "HAS_MMPROJ_UNC_E2B=0"
+set "HAS_MMPROJ_UNC_E4B=0"
 set "E2B_FILE="
 set "E4B_FILE="
 set "B31_FILE="
+set "UNC_E2B_FILE="
+set "UNC_E4B_FILE="
+
+:: --- Standard Gemma 4 ---
 if exist "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf" )
 if exist "%MODELS%\gemma-4-e2b.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-e2b.gguf" )
 if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf" )
@@ -119,6 +136,29 @@ if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-3
 if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
 if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
 if exist "%MODELS%\gemma-4-e4b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E4B=1" )
+
+:: --- Uncensored (HauhauCS Aggressive) — pick any quant present ---
+for %%F in ("%MODELS%\Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-*.gguf") do (
+    if not "!UNC_E2B_FILE!"=="" (
+        rem keep first
+    ) else (
+        set "HAS_UNC_E2B=1"
+        set "UNC_E2B_FILE=%%~nxF"
+    )
+)
+for %%F in ("%MODELS%\Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-*.gguf") do (
+    if not "!UNC_E4B_FILE!"=="" (
+        rem keep first
+    ) else (
+        set "HAS_UNC_E4B=1"
+        set "UNC_E4B_FILE=%%~nxF"
+    )
+)
+if exist "%MODELS%\mmproj-Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-f16.gguf" set "HAS_MMPROJ_UNC_E2B=1"
+if exist "%MODELS%\mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf" set "HAS_MMPROJ_UNC_E4B=1"
+exit /b 0
+
+:after_detect
 
 :: Default model selection
 if "!HAS_E2B!"=="1" (
@@ -198,23 +238,14 @@ echo  ============================================
 echo    Select Model
 echo  ============================================
 echo.
-echo  Available models:
+echo  Standard:
+if "!HAS_E2B!"=="1" ( echo    [1]  Gemma 4 E2B                   - fast, light      4+ GB RAM ) else ( echo    [1]  Gemma 4 E2B                   - [not downloaded] )
+if "!HAS_E4B!"=="1" ( echo    [2]  Gemma 4 E4B                   - smarter          8+ GB RAM ) else ( echo    [2]  Gemma 4 E4B                   - [not downloaded] )
+if "!HAS_31B!"=="1" ( echo    [3]  Gemma 4 31B                   - most powerful   20+ GB RAM ) else ( echo    [3]  Gemma 4 31B                   - [not downloaded] )
 echo.
-if "!HAS_E2B!"=="1" (
-    echo    [1]  Gemma 4 E2B   - fast, light      - 4+ GB RAM
-) else (
-    echo    [1]  Gemma 4 E2B   - [not downloaded]
-)
-if "!HAS_E4B!"=="1" (
-    echo    [2]  Gemma 4 E4B   - smarter          - 8+ GB RAM
-) else (
-    echo    [2]  Gemma 4 E4B   - [not downloaded]
-)
-if "!HAS_31B!"=="1" (
-    echo    [3]  Gemma 4 31B   - most powerful    - 20+ GB RAM
-) else (
-    echo    [3]  Gemma 4 31B   - [not downloaded]
-)
+echo  Uncensored  ^(content unfiltered, your responsibility^):
+if "!HAS_UNC_E2B!"=="1" ( echo    [4]  Gemma 4 E2B  *** UNCENSORED ***  - HauhauCS Aggressive ) else ( echo    [4]  Gemma 4 E2B  *** UNCENSORED ***  - [not downloaded] )
+if "!HAS_UNC_E4B!"=="1" ( echo    [5]  Gemma 4 E4B  *** UNCENSORED ***  - HauhauCS Aggressive ) else ( echo    [5]  Gemma 4 E4B  *** UNCENSORED ***  - [not downloaded] )
 echo.
 if defined MODEL_FILE echo  Current: !MODEL_NAME!
 echo.
@@ -225,6 +256,8 @@ set /p "MC=  > "
 if "!MC!"=="1" goto :pick_e2b
 if "!MC!"=="2" goto :pick_e4b
 if "!MC!"=="3" goto :pick_31b
+if "!MC!"=="4" goto :pick_unc_e2b
+if "!MC!"=="5" goto :pick_unc_e4b
 goto :main_menu
 
 :pick_e2b
@@ -256,6 +289,28 @@ if "!HAS_31B!"=="1" (
 ) else (
     echo.
     echo  Not downloaded. Use [4] Download models.
+    timeout /t 2 >nul
+)
+goto :main_menu
+
+:pick_unc_e2b
+if "!HAS_UNC_E2B!"=="1" (
+    set "MODEL_FILE=!UNC_E2B_FILE!"
+    set "MODEL_NAME=Gemma 4 E2B *UNCENSORED*"
+) else (
+    echo.
+    echo  Not downloaded. Use [4] Download models -^> [u].
+    timeout /t 2 >nul
+)
+goto :main_menu
+
+:pick_unc_e4b
+if "!HAS_UNC_E4B!"=="1" (
+    set "MODEL_FILE=!UNC_E4B_FILE!"
+    set "MODEL_NAME=Gemma 4 E4B *UNCENSORED*"
+) else (
+    echo.
+    echo  Not downloaded. Use [4] Download models -^> [u].
     timeout /t 2 >nul
 )
 goto :main_menu
@@ -313,24 +368,7 @@ goto :settings_menu
 :: =============================================
 :download_menu
 :: Re-detect models after downloads
-set "HAS_E2B=0"
-set "HAS_E4B=0"
-set "HAS_31B=0"
-set "HAS_MMPROJ=0"
-set "HAS_MMPROJ_E2B=0"
-set "HAS_MMPROJ_E4B=0"
-set "E2B_FILE="
-set "E4B_FILE="
-set "B31_FILE="
-if exist "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf" )
-if exist "%MODELS%\gemma-4-e2b.gguf" ( set "HAS_E2B=1" & set "E2B_FILE=gemma-4-e2b.gguf" )
-if exist "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf" )
-if exist "%MODELS%\gemma-4-e4b.gguf" ( set "HAS_E4B=1" & set "E4B_FILE=gemma-4-e4b.gguf" )
-if exist "%MODELS%\gemma-4-31B-it-Q4_K_M.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31B-it-Q4_K_M.gguf" )
-if exist "%MODELS%\gemma-4-31b.gguf" ( set "HAS_31B=1" & set "B31_FILE=gemma-4-31b.gguf" )
-if exist "%MODELS%\gemma-4-e2b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
-if exist "%MODELS%\gemma-4-e2b-mmproj-BF16.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E2B=1" )
-if exist "%MODELS%\gemma-4-e4b-mmproj.gguf" ( set "HAS_MMPROJ=1" & set "HAS_MMPROJ_E4B=1" )
+call :detect_models
 :: Auto-select first available model if none selected
 if not defined MODEL_FILE if "!HAS_E2B!"=="1" ( set "MODEL_FILE=!E2B_FILE!" & set "MODEL_NAME=Gemma 4 E2B" )
 if not defined MODEL_FILE if "!HAS_E4B!"=="1" ( set "MODEL_FILE=!E4B_FILE!" & set "MODEL_NAME=Gemma 4 E4B" )
@@ -352,43 +390,24 @@ if "!IS_FAT32!"=="1" (
 )
 echo  Models on disk:
 echo.
-if "!HAS_E2B!"=="1" (
-    echo    Gemma 4 E2B    [OK]
-) else (
-    echo    Gemma 4 E2B    [missing]
-)
-if "!HAS_E4B!"=="1" (
-    echo    Gemma 4 E4B    [OK]
-) else (
-    echo    Gemma 4 E4B    [not downloaded]
-)
-if "!HAS_31B!"=="1" (
-    echo    Gemma 4 31B    [OK]
-) else (
-    echo    Gemma 4 31B    [not downloaded]
-)
-if "!HAS_MMPROJ_E2B!"=="1" (
-    echo    Vision E2B     [OK]
-) else (
-    echo    Vision E2B     [not downloaded]
-)
-if "!HAS_MMPROJ_E4B!"=="1" (
-    echo    Vision E4B     [OK]
-) else (
-    echo    Vision E4B     [not downloaded]
-)
+if "!HAS_E2B!"=="1" ( echo    Gemma 4 E2B           [OK] ) else ( echo    Gemma 4 E2B           [missing] )
+if "!HAS_E4B!"=="1" ( echo    Gemma 4 E4B           [OK] ) else ( echo    Gemma 4 E4B           [not downloaded] )
+if "!HAS_31B!"=="1" ( echo    Gemma 4 31B           [OK] ) else ( echo    Gemma 4 31B           [not downloaded] )
+if "!HAS_UNC_E2B!"=="1" ( echo    Gemma 4 E2B  *UNC*    [OK] ) else ( echo    Gemma 4 E2B  *UNC*    [not downloaded] )
+if "!HAS_UNC_E4B!"=="1" ( echo    Gemma 4 E4B  *UNC*    [OK] ) else ( echo    Gemma 4 E4B  *UNC*    [not downloaded] )
 echo.
-echo  Available downloads:
+echo  Standard models  (vision module is downloaded automatically):
 echo.
-echo    [1]  Gemma 4 E2B    ~1.8 GB   fast, light     4+ GB RAM
-echo    [2]  Gemma 4 E4B    ~3.1 GB   smarter         8+ GB RAM
+echo    [1]  Gemma 4 E2B    ~2.7 GB total   fast, light     4+ GB RAM
+echo    [2]  Gemma 4 E4B    ~4.1 GB total   smarter         8+ GB RAM
 if "!IS_FAT32!"=="1" (
-    echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM  [needs exFAT!]
+    echo    [3]  Gemma 4 31B    ~18 GB          most powerful   20+ GB RAM  [needs exFAT!]
 ) else (
-    echo    [3]  Gemma 4 31B    ~18 GB    most powerful   20+ GB RAM
+    echo    [3]  Gemma 4 31B    ~18 GB          most powerful   20+ GB RAM
 )
-echo    [4]  Vision E2B     ~941 MB   image/audio for E2B
-echo    [5]  Vision E4B     ~990 MB   image/audio for E4B
+echo.
+echo  Advanced:
+echo    [u]  Uncensored models  (HauhauCS abliterated, requires consent)
 echo.
 if exist "!PORTABLE_PY!" (
     echo    [p]  Portable Python  [OK]  required for RAG/tools
@@ -403,29 +422,31 @@ set /p "DC=  > "
 if "!DC!"=="1" goto :download_e2b
 if "!DC!"=="2" goto :download_e4b
 if "!DC!"=="3" goto :download_31b
-if "!DC!"=="4" goto :download_mmproj_e2b
-if "!DC!"=="5" goto :download_mmproj_e4b
+if /i "!DC!"=="u" goto :download_uncensored_menu
 if /i "!DC!"=="p" goto :download_python
 goto :main_menu
 
 :download_e2b
 if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
-echo  Downloading Gemma 4 E2B...
+echo  Downloading Gemma 4 E2B (Q4_K_M, ~1.8 GB)...
 echo  Source: huggingface.co/unsloth/gemma-4-E2B-it-GGUF
 echo.
 curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf"
 if errorlevel 1 (
     echo.
-    echo  [X] Download failed. Check your internet connection.
+    echo  [X] Main model download failed.
     del "%MODELS%\gemma-4-E2B-it-Q4_K_M.gguf" 2>nul
-) else (
-    set "HAS_E2B=1"
-    set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf"
     echo.
-    echo  [OK] Gemma 4 E2B downloaded!
-    if "!HAS_MMPROJ_E2B!"=="0" goto :offer_mmproj_e2b
+    echo  Press any key...
+    pause >nul
+    goto :download_menu
 )
+set "HAS_E2B=1"
+set "E2B_FILE=gemma-4-E2B-it-Q4_K_M.gguf"
+echo  [OK] Main model downloaded.
+:: Auto-download vision module
+if "!HAS_MMPROJ_E2B!"=="0" call :dl_mmproj_e2b
 echo.
 echo  Press any key...
 pause >nul
@@ -434,25 +455,59 @@ goto :download_menu
 :download_e4b
 if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
-echo  Downloading Gemma 4 E4B...
+echo  Downloading Gemma 4 E4B (Q4_K_M, ~3.1 GB)...
 echo  Source: huggingface.co/unsloth/gemma-4-E4B-it-GGUF
 echo.
 curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"
 if errorlevel 1 (
     echo.
-    echo  [X] Download failed. Check your internet connection.
+    echo  [X] Main model download failed.
     del "%MODELS%\gemma-4-E4B-it-Q4_K_M.gguf" 2>nul
-) else (
-    set "HAS_E4B=1"
-    set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
     echo.
-    echo  [OK] Gemma 4 E4B downloaded!
-    if "!HAS_MMPROJ_E4B!"=="0" goto :offer_mmproj_e4b
+    echo  Press any key...
+    pause >nul
+    goto :download_menu
 )
+set "HAS_E4B=1"
+set "E4B_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
+echo  [OK] Main model downloaded.
+:: Auto-download vision module
+if "!HAS_MMPROJ_E4B!"=="0" call :dl_mmproj_e4b
 echo.
 echo  Press any key...
 pause >nul
 goto :download_menu
+
+:: Auto-mmproj sub-routines (no user prompt — always download alongside main).
+:: NOTE: Echo strings inside `if (...)` blocks must NOT contain literal `(` or
+:: `)` — batch parses parens lazily and an inline `)` closes the block early.
+:dl_mmproj_e2b
+echo.
+echo  Downloading vision module for E2B  ~941 MB ...
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-e2b-it-f16.gguf?download=true"
+if errorlevel 1 goto :dl_mmproj_e2b_fail
+set "HAS_MMPROJ=1"
+set "HAS_MMPROJ_E2B=1"
+echo  [OK] Vision module downloaded.
+exit /b 0
+:dl_mmproj_e2b_fail
+echo  [!] Vision module download failed; continuing without it.
+del "%MODELS%\gemma-4-e2b-mmproj.gguf" 2>nul
+exit /b 1
+
+:dl_mmproj_e4b
+echo.
+echo  Downloading vision module for E4B  ~990 MB ...
+curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e4b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-e4b-it-f16.gguf?download=true"
+if errorlevel 1 goto :dl_mmproj_e4b_fail
+set "HAS_MMPROJ=1"
+set "HAS_MMPROJ_E4B=1"
+echo  [OK] Vision module downloaded.
+exit /b 0
+:dl_mmproj_e4b_fail
+echo  [!] Vision module download failed; continuing without it.
+del "%MODELS%\gemma-4-e4b-mmproj.gguf" 2>nul
+exit /b 1
 
 :download_31b
 if "!IS_FAT32!"=="1" (
@@ -484,81 +539,245 @@ echo  Press any key...
 pause >nul
 goto :download_menu
 
-:offer_mmproj_e2b
-echo.
-echo  --------------------------------------------
-echo  Vision model for E2B enables image/audio input (~941 MB).
-echo.
-set "DV="
-set /p "DV=  Download vision model for E2B now? [y/n] > "
-if /i not "!DV!"=="y" (
-    echo.
-    echo  Skipped. You can download it later from [4] Download models.
-    echo.
-    echo  Press any key...
-    pause >nul
-    goto :download_menu
-)
+:: =============================================
+::  Uncensored models — HauhauCS Aggressive (abliterated Gemma 4)
+:: =============================================
+::  These models have refusal alignment removed via abliteration.
+::  Architecture/weights are the same Gemma 4 base — fully compatible.
+::  First entry requires explicit consent which is recorded in
+::  Files\data\uncensored_consent.log with HMAC signature for tamper-evidence.
 
-:download_mmproj_e2b
+:download_uncensored_menu
+:: Re-detect to refresh state after any download
+call :detect_models
+cls
+echo.
+echo  ============================================
+echo    Uncensored Models  (advanced)
+echo  ============================================
+echo.
+echo    HauhauCS Aggressive variants of Gemma 4 E2B/E4B.
+echo    Refusals removed; capabilities and weights unchanged.
+echo.
+if "!HAS_UNC_E2B!"=="1" ( echo    E2B Uncensored        [OK]  !UNC_E2B_FILE! ) else ( echo    E2B Uncensored        [not downloaded] )
+if "!HAS_UNC_E4B!"=="1" ( echo    E4B Uncensored        [OK]  !UNC_E4B_FILE! ) else ( echo    E4B Uncensored        [not downloaded] )
+echo.
+echo    [1]  Download E2B Uncensored
+echo    [2]  Download E4B Uncensored
+echo.
+echo    [r]  Revoke consent  (deletes log, requires re-accept)
+echo    [0]  Back
+echo.
+set "UC="
+set /p "UC=  > "
+if "!UC!"=="1" goto :unc_pick_e2b_quant
+if "!UC!"=="2" goto :unc_pick_e4b_quant
+if /i "!UC!"=="r" goto :revoke_consent
+goto :download_menu
+
+:unc_pick_e2b_quant
+call :require_consent || goto :download_uncensored_menu
+cls
+echo.
+echo  ============================================
+echo    Uncensored E2B  -  Choose Quantization
+echo  ============================================
+echo.
+echo    [1]  Q3_K_P     ~1.4 GB   smaller, lower quality
+echo    [2]  Q4_K_P     ~1.8 GB   recommended (balanced)
+echo    [3]  Q5_K_P     ~2.1 GB   higher quality
+echo    [4]  Q6_K_P     ~2.4 GB   near-original quality
+echo    [5]  Q8_K_P     ~3.0 GB   best quality
+echo.
+echo  Vision module ~940 MB will be downloaded automatically.
+echo    [0]  Back
+echo.
+set "UQ="
+set /p "UQ=  > "
+if "!UQ!"=="1" call :dl_unc_e2b "Q3_K_P"
+if "!UQ!"=="2" call :dl_unc_e2b "Q4_K_P"
+if "!UQ!"=="3" call :dl_unc_e2b "Q5_K_P"
+if "!UQ!"=="4" call :dl_unc_e2b "Q6_K_P"
+if "!UQ!"=="5" call :dl_unc_e2b "Q8_K_P"
+goto :download_uncensored_menu
+
+:unc_pick_e4b_quant
+call :require_consent || goto :download_uncensored_menu
+cls
+echo.
+echo  ============================================
+echo    Uncensored E4B  -  Choose Quantization
+echo  ============================================
+echo.
+if "!IS_FAT32!"=="1" (
+    echo    [!] Drive is FAT32. Q8_K_P ~5.5 GB will fail - 4 GB FAT32 limit.
+    echo.
+)
+echo    [1]  Q3_K_P     ~2.4 GB   smaller, lower quality
+echo    [2]  Q4_K_P     ~3.1 GB   recommended (balanced)
+echo    [3]  Q5_K_P     ~3.8 GB   higher quality
+echo    [4]  Q6_K_P     ~4.4 GB   near-original quality
+echo    [5]  Q8_K_P     ~5.5 GB   best quality
+echo.
+echo  Vision module ~990 MB will be downloaded automatically.
+echo    [0]  Back
+echo.
+set "UQ="
+set /p "UQ=  > "
+if "!UQ!"=="1" call :dl_unc_e4b "Q3_K_P"
+if "!UQ!"=="2" call :dl_unc_e4b "Q4_K_P"
+if "!UQ!"=="3" call :dl_unc_e4b "Q5_K_P"
+if "!UQ!"=="4" call :dl_unc_e4b "Q6_K_P"
+if "!UQ!"=="5" call :dl_unc_e4b "Q8_K_P"
+goto :download_uncensored_menu
+
+:: NOTE: This sub-routine is written WITHOUT `if (...) (...)` bodies that
+:: contain inline parens in echo strings. Batch parses parens lazily; any
+:: literal `)` inside an `if (...) ( ... )` body closes the block early
+:: and produces "Unexpected at this time" / "Nepredvidennoe poyavlenie".
+:: Use goto-style flow control with no parens in echo text instead.
+:dl_unc_e2b
+setlocal EnableDelayedExpansion
+set "Q=%~1"
+set "FN=Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-!Q!.gguf"
+set "URL=https://huggingface.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive/resolve/main/!FN!"
+set "MMPROJ_FN=mmproj-Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-f16.gguf"
+set "MMPROJ_URL=https://huggingface.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive/resolve/main/!MMPROJ_FN!"
+set "MMPROJ_LABEL=E2B Uncensored vision module ~940 MB"
+goto :dl_unc_common
+
+:dl_unc_e4b
+setlocal EnableDelayedExpansion
+set "Q=%~1"
+set "FN=Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-!Q!.gguf"
+set "URL=https://huggingface.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive/resolve/main/!FN!"
+set "MMPROJ_FN=mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"
+set "MMPROJ_URL=https://huggingface.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive/resolve/main/!MMPROJ_FN!"
+set "MMPROJ_LABEL=E4B Uncensored vision module ~990 MB"
+goto :dl_unc_common
+
+:dl_unc_common
 if not exist "%MODELS%" mkdir "%MODELS%"
 echo.
-echo  Downloading Vision model for E2B (mmproj)...
-echo  Source: huggingface.co/ggml-org/gemma-4-E2B-it-GGUF
+echo  Downloading !FN! ...
+curl.exe -L --progress-bar -f -o "%MODELS%\!FN!" "!URL!"
+if errorlevel 1 goto :dl_unc_main_fail
+echo  [OK] Main model downloaded.
+call :log_consent "DOWNLOAD_OK   !FN!"
+if exist "%MODELS%\!MMPROJ_FN!" goto :dl_unc_mmproj_skip
 echo.
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e2b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-e2b-it-f16.gguf?download=true"
-if errorlevel 1 (
-    echo.
-    echo  [X] Download failed. Check your internet connection.
-    del "%MODELS%\gemma-4-e2b-mmproj.gguf" 2>nul
-) else (
-    set "HAS_MMPROJ=1"
-    set "HAS_MMPROJ_E2B=1"
-    echo.
-    echo  [OK] Vision model for E2B downloaded!
-)
+echo  Downloading !MMPROJ_LABEL! ...
+curl.exe -L --progress-bar -f -o "%MODELS%\!MMPROJ_FN!" "!MMPROJ_URL!"
+if errorlevel 1 goto :dl_unc_mmproj_fail
+echo  [OK] Vision module downloaded.
+goto :dl_unc_done
+
+:dl_unc_mmproj_skip
+echo  [OK] Vision module already present.
+goto :dl_unc_done
+
+:dl_unc_mmproj_fail
+echo  [!] Vision module download failed; continuing without it.
+del "%MODELS%\!MMPROJ_FN!" 2>nul
+goto :dl_unc_done
+
+:dl_unc_main_fail
+echo  [X] Main model download failed.
+del "%MODELS%\!FN!" 2>nul
+endlocal
 echo.
 echo  Press any key...
 pause >nul
-goto :download_menu
+exit /b 1
 
-:offer_mmproj_e4b
-echo.
-echo  --------------------------------------------
-echo  Vision model for E4B enables image/audio input (~990 MB).
-echo.
-set "DV="
-set /p "DV=  Download vision model for E4B now? [y/n] > "
-if /i not "!DV!"=="y" (
-    echo.
-    echo  Skipped. You can download it later from [5] Download models.
-    echo.
-    echo  Press any key...
-    pause >nul
-    goto :download_menu
-)
-
-:download_mmproj_e4b
-if not exist "%MODELS%" mkdir "%MODELS%"
-echo.
-echo  Downloading Vision model for E4B (mmproj)...
-echo  Source: huggingface.co/ggml-org/gemma-4-E4B-it-GGUF
-echo.
-curl.exe -L --progress-bar -f -o "%MODELS%\gemma-4-e4b-mmproj.gguf" "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-e4b-it-f16.gguf?download=true"
-if errorlevel 1 (
-    echo.
-    echo  [X] Download failed. Check your internet connection.
-    del "%MODELS%\gemma-4-e4b-mmproj.gguf" 2>nul
-) else (
-    set "HAS_MMPROJ=1"
-    set "HAS_MMPROJ_E4B=1"
-    echo.
-    echo  [OK] Vision model for E4B downloaded!
-)
+:dl_unc_done
+endlocal
 echo.
 echo  Press any key...
 pause >nul
-goto :download_menu
+exit /b 0
+
+:: ---- Consent management ----
+:require_consent
+:: Returns errorlevel 0 if consent is recorded; otherwise prompts.
+if exist "!CONSENT_LOG!" (
+    findstr /B /C:"CONSENT_GRANTED" "!CONSENT_LOG!" >nul 2>&1
+    if not errorlevel 1 exit /b 0
+)
+:grant_consent_prompt
+cls
+echo.
+echo  ==============================================================
+echo    UNCENSORED MODELS - READ CAREFULLY
+echo  ==============================================================
+echo.
+echo    These models have safety alignment REMOVED.
+echo    They will generate ANY content you request, including content
+echo    that may be:
+echo      - illegal in your jurisdiction
+echo      - harmful, offensive, or dangerous
+echo      - false but presented as factual
+echo.
+echo    USE AT YOUR OWN RISK.
+echo    YOU are fully responsible for everything you generate,
+echo    request, store, and share.
+echo.
+echo    By proceeding, you confirm:
+echo      - You are 18+ or legal adult age in your country.
+echo      - You will not use generated content to harm others.
+echo      - You will not redistribute illegal content.
+echo      - The project authors are NOT liable for your use.
+echo.
+echo    Type exactly:  I ACCEPT
+echo    Or press Enter to cancel.
+echo  ==============================================================
+echo.
+set "CONSENT_INPUT="
+set /p "CONSENT_INPUT=  > "
+if /i not "!CONSENT_INPUT!"=="I ACCEPT" (
+    echo.
+    echo  Consent not granted. Returning to menu.
+    timeout /t 2 >nul
+    exit /b 1
+)
+:: Record consent with hostname, user, volume serial, and HMAC signature.
+if not exist "%FILES%data" mkdir "%FILES%data" >nul 2>&1
+:: Volume serial via PowerShell — locale-independent, works on any Windows.
+set "VOLSER="
+set "_DRIVE=%BASE:~0,2%"
+for /f "delims=" %%S in ('powershell -NoProfile -Command "(Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='!_DRIVE!'\").VolumeSerialNumber" 2^>nul') do set "VOLSER=%%S"
+for /f "delims=" %%T in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')"') do set "TS=%%T"
+set "PAYLOAD=CONSENT_GRANTED ts=!TS! host=%COMPUTERNAME% user=%USERNAME% vol=!VOLSER!"
+:: HMAC-SHA256 (truncated 16 hex chars) — tamper-evident, key fixed in script.
+for /f "delims=" %%H in ('powershell -NoProfile -Command "$k=[Text.Encoding]::UTF8.GetBytes('USBClaw-Consent-v1');$m=[Text.Encoding]::UTF8.GetBytes('!PAYLOAD!');$h=[Security.Cryptography.HMACSHA256]::new($k);[BitConverter]::ToString($h.ComputeHash($m)).Replace('-','').ToLower().Substring(0,16)"') do set "SIG=%%H"
+>>"!CONSENT_LOG!" echo !PAYLOAD! sig=!SIG!
+echo.
+echo  [OK] Consent recorded to Files\data\uncensored_consent.log
+timeout /t 1 >nul
+exit /b 0
+
+:log_consent
+:: Append a signed entry to the consent log. Argument: free-form payload.
+if not exist "%FILES%data" mkdir "%FILES%data" >nul 2>&1
+set "LP=%~1"
+for /f "delims=" %%T in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')"') do set "LTS=%%T"
+set "LPAYLOAD=!LTS! !LP! host=%COMPUTERNAME%"
+for /f "delims=" %%H in ('powershell -NoProfile -Command "$k=[Text.Encoding]::UTF8.GetBytes('USBClaw-Consent-v1');$m=[Text.Encoding]::UTF8.GetBytes('!LPAYLOAD!');$h=[Security.Cryptography.HMACSHA256]::new($k);[BitConverter]::ToString($h.ComputeHash($m)).Replace('-','').ToLower().Substring(0,16)"') do set "LSIG=%%H"
+>>"!CONSENT_LOG!" echo !LPAYLOAD! sig=!LSIG!
+exit /b 0
+
+:revoke_consent
+echo.
+echo  Revoke consent will delete the consent log. You will be asked
+echo  to accept terms again next time you download an uncensored model.
+echo.
+set "RV="
+set /p "RV=  Confirm? [y/n] > "
+if /i not "!RV!"=="y" goto :download_uncensored_menu
+del "!CONSENT_LOG!" 2>nul
+echo  [OK] Consent log deleted.
+timeout /t 1 >nul
+goto :download_uncensored_menu
 
 :: =============================================
 ::  Portable Python (embeddable) — core installer
@@ -683,13 +902,20 @@ if not exist "!MODEL_PATH!" (
 )
 
 :: Build extra args
-set "EXTRA_ARGS="
+:: --jinja: enable Jinja chat template (recommended for Gemma 4 family)
+set "EXTRA_ARGS=--jinja"
 
-:: Multimodal — select the correct mmproj for the chosen model
-:: Each model needs its own mmproj (E2B and E4B have different embedding sizes)
+:: Detect if model is uncensored (used for mmproj path + UI banner + system prompt)
+set "IS_UNCENSORED=0"
+echo !MODEL_FILE! | findstr /I /C:"Uncensored" >nul && set "IS_UNCENSORED=1"
+
+:: Multimodal — select the correct mmproj for the chosen model.
+:: Each model needs its own mmproj (different embedding sizes per family).
 set "MMPROJ_FILE="
 if "!MODEL_NAME!"=="Gemma 4 E2B" set "MMPROJ_FILE=!MMPROJ_E2B!"
 if "!MODEL_NAME!"=="Gemma 4 E4B" set "MMPROJ_FILE=!MMPROJ_E4B!"
+if "!MODEL_NAME!"=="Gemma 4 E2B *UNCENSORED*" set "MMPROJ_FILE=mmproj-Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-f16.gguf"
+if "!MODEL_NAME!"=="Gemma 4 E4B *UNCENSORED*" set "MMPROJ_FILE=mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"
 
 if defined MMPROJ_FILE (
     set "MMPROJ_PATH=%MODELS%\!MMPROJ_FILE!"
@@ -700,7 +926,7 @@ if defined MMPROJ_FILE (
         )
     )
     if "!MMPROJ_OK!"=="1" (
-        set "EXTRA_ARGS=--mmproj "!MMPROJ_PATH!""
+        set "EXTRA_ARGS=!EXTRA_ARGS! --mmproj "!MMPROJ_PATH!""
     ) else (
         if exist "!MMPROJ_PATH!" (
             echo  [!] Vision model file seems corrupt or incomplete, skipping.
@@ -711,6 +937,11 @@ if defined MMPROJ_FILE (
             echo.
         )
     )
+)
+
+:: Audit log entry for uncensored launches (tamper-evident)
+if "!IS_UNCENSORED!"=="1" (
+    call :log_consent "MODEL_LAUNCH  !MODEL_FILE! ctx=!CTX!"
 )
 
 :: Reasoning is now controlled dynamically by the RAG proxy (inject.js toggle button)
@@ -808,11 +1039,12 @@ echo.
 
 :after_load
 
-:: Start RAG proxy
+:: Start RAG proxy (pass model filename so it can pick correct system prompt
+:: and expose uncensored flag to the browser banner)
 if defined PYTHON (
     if exist "!RAG_SERVER!" (
         echo  Starting RAG proxy...
-        start "rag-proxy" "!PYTHON!" "!RAG_SERVER!" --port %RAG_PORT% --llama-port %PORT%
+        start "rag-proxy" "!PYTHON!" "!RAG_SERVER!" --port %RAG_PORT% --llama-port %PORT% --model-name "!MODEL_FILE!"
         timeout /t 2 >nul
     )
 )

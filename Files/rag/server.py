@@ -52,6 +52,7 @@ CHUNKS_FILE = INDEX_DIR / "chunks.json"
 INDEX_FILE = INDEX_DIR / "bm25_index.json"
 META_FILE = INDEX_DIR / "meta.json"
 SYSTEM_PROMPT_FILE = BASE_DIR / "config" / "system_prompt.txt"
+SYSTEM_PROMPT_UNCENSORED_FILE = BASE_DIR / "config" / "system_prompt_uncensored.txt"
 
 # ============================================================
 #  Global State
@@ -67,17 +68,26 @@ index_meta = {}      # {"doc_count", "chunk_count", "indexed_at", "files"}
 
 MAX_TOOL_ROUNDS = 3  # Max tool call iterations per request
 system_prompt = ""   # Loaded from system_prompt.txt at startup
+model_name = ""      # Set from --model-name CLI arg
+is_uncensored = False  # True when running an uncensored model
 
 
-def load_system_prompt():
-    """Load system prompt from file. Returns empty string if file missing."""
+def load_system_prompt(uncensored=False):
+    """Load the appropriate system prompt file."""
+    path = SYSTEM_PROMPT_UNCENSORED_FILE if uncensored else SYSTEM_PROMPT_FILE
     try:
-        return SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
+        return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        print("  [WARN] system_prompt.txt not found — no system prompt")
+        if uncensored:
+            # Fall back to standard prompt; uncensored prompt is optional.
+            try:
+                return SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
+            except Exception:
+                return ""
+        print(f"  [WARN] {path.name} not found — no system prompt")
         return ""
     except Exception as e:
-        print(f"  [WARN] Cannot read system_prompt.txt: {e}")
+        print(f"  [WARN] Cannot read {path.name}: {e}")
         return ""
 
 LLAMA_HOST = "127.0.0.1"
@@ -502,6 +512,8 @@ class RAGHandler(BaseHTTPRequestHandler):
             "is_indexing": is_indexing,
             "has_index": bm25 is not None,
             "meta": index_meta,
+            "model_name": model_name,
+            "is_uncensored": is_uncensored,
         }
         self._send_json(200, status)
 
@@ -1264,6 +1276,7 @@ def main():
     parser = argparse.ArgumentParser(description="RAG Proxy for AI USB Assistant")
     parser.add_argument("--port", type=int, default=8085, help="Proxy port (default: 8085)")
     parser.add_argument("--llama-port", type=int, default=8080, help="llama-server port (default: 8080)")
+    parser.add_argument("--model-name", default="", help="Filename of the loaded GGUF model (used to pick system prompt and toggle uncensored UI)")
     args = parser.parse_args()
 
     RAG_PORT = args.port
@@ -1273,11 +1286,18 @@ def main():
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load system prompt
-    global system_prompt
-    system_prompt = load_system_prompt()
+    # Detect uncensored model from filename and pick the appropriate prompt
+    global system_prompt, model_name, is_uncensored
+    model_name = args.model_name or ""
+    is_uncensored = "uncensored" in model_name.lower()
+    system_prompt = load_system_prompt(uncensored=is_uncensored)
+    if is_uncensored:
+        print(f"  [MODEL] *** UNCENSORED *** {model_name}")
+    elif model_name:
+        print(f"  [MODEL] {model_name}")
     if system_prompt:
-        print(f"  [SYSTEM] Loaded system prompt ({len(system_prompt)} chars)")
+        which = "uncensored" if is_uncensored else "standard"
+        print(f"  [SYSTEM] Loaded {which} system prompt ({len(system_prompt)} chars)")
     else:
         print(f"  [SYSTEM] No system prompt configured")
 
