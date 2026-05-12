@@ -53,6 +53,8 @@ INDEX_FILE = INDEX_DIR / "bm25_index.json"
 META_FILE = INDEX_DIR / "meta.json"
 SYSTEM_PROMPT_FILE = BASE_DIR / "config" / "system_prompt.txt"
 SYSTEM_PROMPT_UNCENSORED_FILE = BASE_DIR / "config" / "system_prompt_uncensored.txt"
+STORAGE_FILE = BASE_DIR / "data" / "storage.json"  # USB-persisted browser state (localStorage + IndexedDB)
+STORAGE_MAX_BYTES = 256 * 1024 * 1024  # 256 MB cap — chats with base64 image attachments can be large
 
 # ============================================================
 #  Global State
@@ -468,6 +470,8 @@ class RAGHandler(BaseHTTPRequestHandler):
             self._handle_list_files()
         elif self.path == "/rag/tools/status":
             self._handle_tools_status()
+        elif self.path == "/storage/load":
+            self._handle_storage_load()
         else:
             self._proxy_get()
 
@@ -484,6 +488,8 @@ class RAGHandler(BaseHTTPRequestHandler):
             self._handle_search()
         elif self.path == "/rag/upload":
             self._handle_upload()
+        elif self.path == "/storage/save":
+            self._handle_storage_save()
         elif self.path == "/v1/chat/completions":
             self._handle_chat_completions()
         else:
@@ -499,6 +505,85 @@ class RAGHandler(BaseHTTPRequestHandler):
         self.send_response(204)
         self._send_cors_headers()
         self.end_headers()
+
+    # ---------- USB Persistence (browser localStorage mirror) ----------
+
+    def _handle_storage_load(self):
+        """Return the JSON object that was last persisted to USB.
+
+        Called once at page load by inject.js (synchronously) before the
+        llama-server WebUI initializes. Empty object on first run.
+        """
+        try:
+            if STORAGE_FILE.exists():
+                data = STORAGE_FILE.read_text(encoding="utf-8")
+                # Validate it parses
+                json.loads(data)
+                size_kb = len(data) / 1024.0
+                print(f"  [STORAGE] load -> {size_kb:.1f} KB from {STORAGE_FILE}")
+                # No-cache: this endpoint must always return the latest
+                # snapshot — never let the browser serve a stale cached copy.
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data.encode("utf-8"))))
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(data.encode("utf-8"))
+                return
+            print(f"  [STORAGE] load -> file does not exist yet ({STORAGE_FILE})")
+        except Exception as e:
+            print(f"  [STORAGE] load failed: {e}")
+        self._send_json(200, {})
+
+    def _handle_storage_save(self):
+        """Atomically persist a JSON snapshot of browser localStorage to USB.
+
+        Accepts both regular POST and sendBeacon (which sets text/plain).
+        Writes via temp file + replace to avoid corruption on USB removal.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > STORAGE_MAX_BYTES:
+            self._send_json(413, {"ok": False, "error": "payload too large or empty"})
+            return
+        try:
+            raw = self.rfile.read(length)
+            # Validate JSON before writing — never persist garbage
+            parsed = json.loads(raw.decode("utf-8"))
+            STORAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = STORAGE_FILE.with_suffix(".json.tmp")
+            tmp.write_bytes(raw)
+            os.replace(tmp, STORAGE_FILE)
+            # Diagnostic: report what we just saved so the user can see in the
+            # terminal that chats really do reach the USB drive.
+            try:
+                idb = parsed.get("idb", {}) if isinstance(parsed, dict) else {}
+                ls = parsed.get("localStorage", {}) if isinstance(parsed, dict) else {}
+                conv_n = len(idb.get("conversations", []) or [])
+                msg_n = len(idb.get("messages", []) or [])
+                ls_n = len(ls) if isinstance(ls, dict) else 0
+                size_kb = len(raw) / 1024.0
+                print(f"  [STORAGE] save <- {size_kb:.1f} KB "
+                      f"(conversations={conv_n}, messages={msg_n}, ls_keys={ls_n})")
+            except Exception:
+                pass
+            self._send_json(200, {"ok": True, "bytes": len(raw)})
+        except Exception as e:
+            print(f"  [STORAGE] save failed: {e}")
+            self._send_json(500, {"ok": False, "error": str(e)})
+
+    def _send_response_raw(self, status, content_type, body_bytes):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body_bytes)))
+        self._send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body_bytes)
 
     # ---------- RAG Endpoints ----------
 
@@ -1079,23 +1164,43 @@ class RAGHandler(BaseHTTPRequestHandler):
         url = f"http://{LLAMA_HOST}:{LLAMA_PORT}{self.path}"
         try:
             req = Request(url)
-            # Forward headers (except Host)
+            # Forward headers (except Host and anything that would let upstream
+            # answer 304 Not Modified — a 304 has no body, so our inject step
+            # would silently produce a broken page. We always want a full 200.
+            skip_req_headers = {
+                "host", "accept-encoding",
+                "if-none-match", "if-modified-since",
+                "if-match", "if-unmodified-since", "if-range",
+            }
             for key, val in self.headers.items():
-                if key.lower() not in ("host", "accept-encoding"):
+                if key.lower() not in skip_req_headers:
                     req.add_header(key, val)
 
             resp = urlopen(req, timeout=30)
             content = resp.read()
             content_type = resp.headers.get("Content-Type", "")
 
+            is_html = "text/html" in content_type
             # Inject our JS into HTML responses
-            if "text/html" in content_type:
+            if is_html:
                 content = self._inject_script(content)
 
             self.send_response(resp.status)
+            # Strip caching/validation headers from upstream so the browser
+            # always re-fetches HTML (and thus a freshly-injected script). We
+            # also strip ETag/Last-Modified to disable conditional revalidation.
+            skip_resp_headers = {
+                "transfer-encoding", "content-length", "content-encoding",
+            }
+            if is_html:
+                skip_resp_headers |= {"cache-control", "etag", "last-modified", "expires", "pragma"}
             for key, val in resp.headers.items():
-                if key.lower() not in ("transfer-encoding", "content-length", "content-encoding"):
+                if key.lower() not in skip_resp_headers:
                     self.send_header(key, val)
+            if is_html:
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
             self.send_header("Content-Length", len(content))
             self._send_cors_headers()
             self.end_headers()
@@ -1230,12 +1335,17 @@ class RAGHandler(BaseHTTPRequestHandler):
         return html.encode("utf-8")
 
     def _serve_inject_js(self):
-        """Serve the inject.js file."""
+        """Serve the inject.js file. NEVER cache — we ship updates by editing
+        this file on the USB drive, and a stale cached copy would silently
+        break USB persistence after upgrades."""
         try:
             content = INJECT_JS.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "application/javascript")
             self.send_header("Content-Length", len(content))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self._send_cors_headers()
             self.end_headers()
             self.wfile.write(content)

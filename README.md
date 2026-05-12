@@ -63,7 +63,8 @@ For image and audio input, download the multimodal projector:
 - **RAG** — document icon in browser, upload local docs for context-aware answers (requires Python)
 - **Download models** — built-in downloader in the launcher menu
 - **Context size** — adjustable from 2048 to 16384 tokens
-- **Sterile mode** — browser storage (chats, cookies, cache) is wiped automatically on close, no traces left on host PC
+- **USB-persisted chats** — chat history and settings are mirrored to `Files/data/storage.json` on the USB stick. On next launch (even on a different PC) chats are restored automatically.
+- **Sterile host** — on tab close the browser's `localStorage`, `sessionStorage`, cookies, IndexedDB and caches are wiped, so the host PC keeps no traces. Your data lives only on the USB drive.
 
 ## ⚠ Uncensored models
 

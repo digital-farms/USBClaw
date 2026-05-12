@@ -22,6 +22,10 @@ Files/data/chats/*
 # Uncensored consent log (per-USB, never committed)
 Files/data/uncensored_consent.log
 
+# USB-persisted browser localStorage snapshot (chats, settings)
+Files/data/storage.json
+Files/data/storage.json.tmp
+
 # OS junk
 Thumbs.db
 .DS_Store

@@ -6,6 +6,363 @@
     'use strict';
 
     const RAG_BASE = window.location.origin;
+
+    // ============================================================
+    // USB Persistence (localStorage + IndexedDB → Files/data/storage.json)
+    // ============================================================
+    // The llama-server WebUI (Svelte + Dexie) stores chat history in an
+    // IndexedDB database named `LlamacppWebui` with two object stores:
+    // `conversations` and `messages`. UI settings (model defaults, sidebar
+    // state, etc.) live in localStorage. Neither of those follows the USB
+    // stick across machines, and sterile mode wipes them on tab close.
+    //
+    // We mirror BOTH to a single JSON file on the USB:
+    //
+    //   storage.json = {
+    //     "localStorage": { "<key>": "<value>", ... },
+    //     "idb": { "conversations": [ ... ], "messages": [ ... ] }
+    //   }
+    //
+    // Flow:
+    //   1. At script load — sync XHR fetches the snapshot and seeds
+    //      localStorage immediately (sync, before the WebUI module reads it).
+    //   2. The IDB portion is restored asynchronously: open `LlamacppWebui`,
+    //      if it is empty AND the USB has data, bulkPut everything and
+    //      reload the page so the WebUI re-reads the populated DB.
+    //   3. IDBObjectStore.put/add/delete/clear and Storage.prototype.setItem
+    //      etc. are hooked to schedule a debounced full export back to USB.
+    //   4. On tab close: sendBeacon a final snapshot, then wipe host state.
+    //
+    // Backward compat: if storage.json contains flat localStorage keys at
+    // the top level (old format), it is treated as { localStorage: data }.
+    const STORAGE_LOAD_URL = '/storage/load';
+    const STORAGE_SAVE_URL = '/storage/save';
+    const STORAGE_DEBOUNCE_MS = 700;
+    const IDB_NAME = 'LlamacppWebui';
+    const IDB_STORES = ['conversations', 'messages'];
+    const IDB_WAIT_TIMEOUT_MS = 20000;  // wait up to 20s for WebUI to create stores
+    const SEEDED_FLAG = 'usbclaw_storage_seeded';
+
+    let storageSaveTimer = null;
+    let storageReady = false;
+    let lastIdbDump = null;  // cached dump kept in sync by the debounced save
+    let usbSnapshot = null;  // parsed storage.json contents (set by sync seed)
+
+    function snapshotLocalStorage() {
+        const out = {};
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k != null) out[k] = localStorage.getItem(k);
+            }
+        } catch (e) { /* storage may be disabled */ }
+        return out;
+    }
+
+    // Open the WebUI DB at whatever version it currently is. We deliberately
+    // do NOT pass a version: WebUI's Dexie owns the schema and bumps versions
+    // across upstream releases (currently v10 at the time of writing). If we
+    // hardcoded a version we'd either trigger VersionError (when WebUI is
+    // already on a newer version) or pre-create an empty DB at v1 that WebUI
+    // then has to upgrade. By opening version-less we attach to the existing
+    // DB read-only-compatibly.
+    function openWebuiDB() {
+        return new Promise((resolve, reject) => {
+            let req;
+            try { req = indexedDB.open(IDB_NAME); }
+            catch (e) { reject(e); return; }
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+            req.onblocked = () => reject(new Error('IDB open blocked'));
+        });
+    }
+
+    function hasWebuiStores(db) {
+        try {
+            return db.objectStoreNames.contains('conversations') &&
+                   db.objectStoreNames.contains('messages');
+        } catch (e) { return false; }
+    }
+
+    // Poll until the WebUI's Dexie has created its object stores. On first
+    // ever launch, the DB does not exist yet; we have to wait for WebUI to
+    // run its upgrade transaction before we can read/write.
+    async function waitForWebuiStores(timeoutMs) {
+        const deadline = Date.now() + (timeoutMs || IDB_WAIT_TIMEOUT_MS);
+        while (Date.now() < deadline) {
+            let db = null;
+            try {
+                db = await openWebuiDB();
+                if (hasWebuiStores(db)) return db;
+                db.close();
+            } catch (e) {
+                if (db) { try { db.close(); } catch (_) {} }
+            }
+            await new Promise((r) => setTimeout(r, 200));
+        }
+        return null;
+    }
+
+    async function dumpDB(db) {
+        if (!hasWebuiStores(db)) return null;
+        const out = {};
+        for (const store of IDB_STORES) {
+            out[store] = await new Promise((resolve) => {
+                try {
+                    const tx = db.transaction(store, 'readonly');
+                    const req = tx.objectStore(store).getAll();
+                    req.onsuccess = () => resolve(req.result || []);
+                    req.onerror = () => resolve([]);
+                } catch (e) { resolve([]); }
+            });
+        }
+        return out;
+    }
+
+    async function bulkImport(db, idbData) {
+        if (!hasWebuiStores(db)) {
+            throw new Error('WebUI object stores not present yet');
+        }
+        for (const store of IDB_STORES) {
+            const items = Array.isArray(idbData[store]) ? idbData[store] : [];
+            if (items.length === 0) continue;
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(store, 'readwrite');
+                const os = tx.objectStore(store);
+                for (const item of items) {
+                    try { os.put(item); } catch (e) { /* skip malformed */ }
+                }
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+                tx.onabort = () => reject(tx.error || new Error('tx aborted'));
+            });
+        }
+    }
+
+    function normalizeSnapshot(raw) {
+        // New format: { localStorage: {...}, idb: {...} }
+        if (raw && typeof raw === 'object' &&
+            (raw.localStorage || raw.idb)) {
+            return {
+                localStorage: raw.localStorage || {},
+                idb: raw.idb || {}
+            };
+        }
+        // Legacy format: flat localStorage object
+        return { localStorage: raw || {}, idb: {} };
+    }
+
+    function scheduleStorageSave() {
+        if (!storageReady) return;
+        if (storageSaveTimer) clearTimeout(storageSaveTimer);
+        storageSaveTimer = setTimeout(async () => {
+            storageSaveTimer = null;
+            let idbDump = null;
+            let db = null;
+            try {
+                db = await openWebuiDB();
+                idbDump = await dumpDB(db);
+            } catch (e) {
+                console.warn('[USBClaw] IDB open failed during save:', e);
+            } finally {
+                if (db) { try { db.close(); } catch (_) {} }
+            }
+            // CRITICAL: never overwrite a valid USB snapshot with an empty
+            // one because the dump failed. dumpDB returns null when the
+            // WebUI stores don't exist yet — in that case keep whatever we
+            // last knew (lastIdbDump), and if even that is unknown, skip
+            // the save entirely so we don't trash chats already on USB.
+            if (idbDump == null) {
+                if (lastIdbDump == null) {
+                    console.debug('[USBClaw] Save skipped: no IDB dump available yet.');
+                    return;
+                }
+                idbDump = lastIdbDump;
+            } else {
+                lastIdbDump = idbDump;
+            }
+            const payload = {
+                localStorage: snapshotLocalStorage(),
+                idb: idbDump
+            };
+            const convN = (idbDump.conversations || []).length;
+            const msgN  = (idbDump.messages || []).length;
+            try {
+                const resp = await fetch(STORAGE_SAVE_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    keepalive: true
+                });
+                if (resp.ok) {
+                    console.log('[USBClaw] Saved to USB: ' + convN +
+                        ' conversations, ' + msgN + ' messages.');
+                } else {
+                    console.warn('[USBClaw] Save responded ' + resp.status);
+                }
+            } catch (e) {
+                console.warn('[USBClaw] Save failed:', e);
+            }
+        }, STORAGE_DEBOUNCE_MS);
+    }
+
+    function hookLocalStorage() {
+        const proto = Storage.prototype;
+        const origSet = proto.setItem;
+        const origRemove = proto.removeItem;
+        const origClear = proto.clear;
+        proto.setItem = function () {
+            const r = origSet.apply(this, arguments);
+            if (this === localStorage) scheduleStorageSave();
+            return r;
+        };
+        proto.removeItem = function () {
+            const r = origRemove.apply(this, arguments);
+            if (this === localStorage) scheduleStorageSave();
+            return r;
+        };
+        proto.clear = function () {
+            const r = origClear.apply(this, arguments);
+            if (this === localStorage) scheduleStorageSave();
+            return r;
+        };
+    }
+
+    function hookIndexedDB() {
+        if (typeof IDBObjectStore === 'undefined') return;
+        const proto = IDBObjectStore.prototype;
+        const wrap = (name) => {
+            const orig = proto[name];
+            if (typeof orig !== 'function') return;
+            proto[name] = function () {
+                const result = orig.apply(this, arguments);
+                try {
+                    const tx = this.transaction;
+                    if (tx && tx.db && tx.db.name === IDB_NAME) {
+                        // Refresh lastIdbDump as soon as this transaction
+                        // commits, so the cleanup beacon on tab-close always
+                        // has a fresh snapshot — even if the user closes
+                        // faster than the debounced save fires.
+                        if (!tx._usbclawDumpScheduled) {
+                            tx._usbclawDumpScheduled = true;
+                            tx.addEventListener('complete', () => {
+                                openWebuiDB().then((db) => {
+                                    dumpDB(db).then((d) => {
+                                        // Only overwrite cache with a real
+                                        // dump — never null (stores missing).
+                                        if (d != null) lastIdbDump = d;
+                                        try { db.close(); } catch (_) {}
+                                    }).catch(() => { try { db.close(); } catch (_) {} });
+                                }).catch(() => { /* ignore */ });
+                            });
+                        }
+                        scheduleStorageSave();
+                    }
+                } catch (e) { /* defensive */ }
+                return result;
+            };
+        };
+        wrap('put');
+        wrap('add');
+        wrap('delete');
+        wrap('clear');
+    }
+
+    // ---- Step 1: Sync seed of localStorage (must run before WebUI module) ----
+    try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', STORAGE_LOAD_URL, false);
+        xhr.send(null);
+        if (xhr.status === 200 && xhr.responseText) {
+            const raw = JSON.parse(xhr.responseText);
+            usbSnapshot = normalizeSnapshot(raw);
+            const ls = usbSnapshot.localStorage || {};
+            for (const k in ls) {
+                if (Object.prototype.hasOwnProperty.call(ls, k)) {
+                    try { localStorage.setItem(k, ls[k]); } catch (e) {}
+                }
+            }
+            const lsCount = Object.keys(ls).length;
+            const convCount = (usbSnapshot.idb.conversations || []).length;
+            const msgCount = (usbSnapshot.idb.messages || []).length;
+            console.log('[USBClaw] Loaded snapshot from USB: ' +
+                lsCount + ' settings, ' + convCount + ' conversations, ' +
+                msgCount + ' messages.');
+        } else {
+            usbSnapshot = { localStorage: {}, idb: {} };
+        }
+    } catch (e) {
+        console.warn('[USBClaw] Storage seed failed:', e);
+        usbSnapshot = { localStorage: {}, idb: {} };
+    }
+
+    hookLocalStorage();
+    hookIndexedDB();
+    storageReady = true;
+
+    // ---- Step 2: Async IDB restore — waits for WebUI to create its stores ----
+    // The WebUI's Dexie initializes the DB lazily on first use (and may run
+    // a schema upgrade transaction). We poll until both `conversations` and
+    // `messages` stores exist, then either bulk-import from USB (and reload
+    // so the UI picks up the new data) or just cache the current dump.
+    (async function restoreIDBFromUSB() {
+        const alreadySeeded = sessionStorage.getItem(SEEDED_FLAG) === '1';
+        const idb = usbSnapshot && usbSnapshot.idb ? usbSnapshot.idb : {};
+        const usbHasData =
+            (Array.isArray(idb.conversations) && idb.conversations.length > 0) ||
+            (Array.isArray(idb.messages) && idb.messages.length > 0);
+
+        const db = await waitForWebuiStores();
+        if (!db) {
+            console.warn('[USBClaw] WebUI IDB stores never appeared — restore skipped.');
+            sessionStorage.setItem(SEEDED_FLAG, '1');
+            return;
+        }
+
+        try {
+            if (alreadySeeded) {
+                // Already restored (or nothing to restore) this session. Just
+                // cache the current dump so subsequent saves don't trash USB.
+                lastIdbDump = await dumpDB(db);
+                return;
+            }
+
+            if (!usbHasData) {
+                lastIdbDump = await dumpDB(db);
+                sessionStorage.setItem(SEEDED_FLAG, '1');
+                return;
+            }
+
+            const current = await dumpDB(db);
+            const isEmpty = !current ||
+                ((current.conversations || []).length === 0 &&
+                 (current.messages || []).length === 0);
+
+            if (isEmpty) {
+                await bulkImport(db, idb);
+                lastIdbDump = await dumpDB(db);
+                sessionStorage.setItem(SEEDED_FLAG, '1');
+                console.log('[USBClaw] IDB restored from USB (' +
+                    (idb.conversations || []).length + ' conversations, ' +
+                    (idb.messages || []).length +
+                    ' messages) — reloading to refresh UI.');
+                // Close DB before reload so WebUI is not blocked.
+                try { db.close(); } catch (_) {}
+                location.reload();
+                return;
+            }
+
+            // DB already has chats — keep them, skip restore.
+            lastIdbDump = current;
+            sessionStorage.setItem(SEEDED_FLAG, '1');
+        } catch (e) {
+            console.warn('[USBClaw] IDB restore failed:', e);
+            sessionStorage.setItem(SEEDED_FLAG, '1');
+        } finally {
+            try { db.close(); } catch (_) {}
+        }
+    })();
+
     let ragEnabled = false;
     let reasoningEnabled = false;
     let toolsEnabled = false;
@@ -596,13 +953,30 @@
         setupSterileMode();
     }
 
-    // ========== Sterile Mode ==========
-    // Wipes all client-side storage when the user closes the tab/browser.
-    // Goal: nothing about USBClaw should remain on the host PC after the
-    // USB stick is unplugged. Chat history, settings, etc. live only for
-    // the active browser session.
+    // ========== Sterile Mode (now USB-Sync + Host Wipe) ==========
+    // On tab close:
+    //   1. Flush the latest localStorage snapshot to USB via sendBeacon
+    //      (synchronous-by-spec; survives the unload).
+    //   2. Wipe the host PC's browser storage so nothing remains locally.
+    // Next time you plug the USB into ANY PC and open USBClaw, chats are
+    // restored from USB by the sync-XHR seeder at the top of this file.
     function setupSterileMode() {
         const cleanup = () => {
+            // 0. Persist final snapshot to USB before wiping (best-effort).
+            //    IDB is async — we can't dump it during unload. Fall back to
+            //    `lastIdbDump`, which is refreshed by the debounced save on
+            //    every chat write, so at worst we lose < STORAGE_DEBOUNCE_MS
+            //    of in-flight edits.
+            try {
+                const payload = {
+                    localStorage: snapshotLocalStorage(),
+                    idb: lastIdbDump || {}
+                };
+                const blob = new Blob([JSON.stringify(payload)],
+                    { type: 'application/json' });
+                navigator.sendBeacon(STORAGE_SAVE_URL, blob);
+            } catch (e) { /* sendBeacon unavailable — host wipe still runs */ }
+
             // 1. localStorage / sessionStorage
             try { localStorage.clear(); } catch (e) {}
             try { sessionStorage.clear(); } catch (e) {}
